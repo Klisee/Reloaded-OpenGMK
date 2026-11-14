@@ -1,0 +1,52 @@
+//! Library root for the GameMaker Classic emulator.
+//!
+//! All modules live here so that both the desktop binary (`src/main.rs`) and the Android
+//! entry point (`src/android_main.rs`) can share the same tree. [`run_game`] is the single
+//! entry point used by both.
+
+mod action;
+mod asset;
+pub(crate) mod battle_diag;
+pub(crate) mod battle_sync;
+pub mod compat;
+pub(crate) mod game;
+pub(crate) mod game_ready;
+mod gml;
+mod handleman;
+mod imgui_key_utils;
+mod imgui_utils;
+mod input;
+mod input_latch;
+mod instance;
+mod instancelist;
+mod math;
+mod mods;
+mod reloaded_online;
+mod render;
+mod tile;
+mod types;
+pub mod ui_assets;
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) mod gamepad;
+mod util;
+
+#[cfg(target_os = "android")]
+mod android_main;
+
+/// The on-screen touch controls and their customisable layout. Built on every target so the
+/// `dump_layout` example can turn the built-in layout into the file the launcher app draws.
+pub mod touch_controls;
+pub mod touch_appearance;
+pub mod touch_skin;
+pub mod field_controls;
+pub mod touch_navigation;
+
+mod main_impl;
+
+mod scan;
+
+pub use main_impl::{help, run_game};
+
+#[cfg(target_os = "android")]
+pub use android_main::android_entry;
