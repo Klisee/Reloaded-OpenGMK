@@ -45,6 +45,12 @@ fun runWindowsApplication(root: File) {
     val onlineEngine = JvmOnlineEngineStore(jvmRepo.gameDir)
     repo.prepare()
 
+    // FileKit necesita saber quién es la app y dónde guardar sus temporales; sin esto los
+    // diálogos de archivo lanzan FileKitNotInitializedException y el botón "Importar" no hace nada.
+    runCatching {
+        FileKit.init(appId = "com.klisee.reloaded.opengmk", filesDir = root, cacheDir = File(root, "cache"))
+    }
+
     @Composable
     fun AppContent(
         colorScheme: ColorScheme? = null,
@@ -59,9 +65,14 @@ fun runWindowsApplication(root: File) {
             settings = settings,
             onPickZip = { callback ->
                 scope.launch {
-                    val file = runCatching {
+                    val file = try {
                         FileKit.openFilePicker(type = FileKitType.File("zip"))
-                    }.getOrNull()
+                    } catch (error: Throwable) {
+                        java.io.File(root, "app.log").appendText(
+                            "No se pudo abrir el selector de archivos: ${error.javaClass.simpleName}: ${error.message}\n",
+                        )
+                        null
+                    }
                     callback(file?.file?.let(::FilePickedFile))
                 }
             },

@@ -228,6 +228,7 @@ fun App(
                 repo = repo,
                 settings = settings,
                 logo = logo,
+                desktop = desktopUi,
                 theme = theme,
                 onThemeChange = { theme = it },
                 onPickZip = onPickZip,
@@ -414,6 +415,7 @@ private fun Onboarding(
     repo: GameStore,
     settings: SettingsStore,
     logo: Painter?,
+    desktop: Boolean = false,
     theme: String,
     onThemeChange: (String) -> Unit,
     onPickZip: ((PickedFile?) -> Unit) -> Unit,
@@ -450,6 +452,47 @@ private fun Onboarding(
 
     val installed = status as? GameStatus.Ready
     val scheme = MaterialTheme.colorScheme
+
+    if (desktop) {
+        CompositionLocalProvider(LocalLauncherStrings provides launcherStrings(language)) {
+            DesktopOnboarding(
+                logo = logo,
+                language = language,
+                onLanguage = { showLanguage = true },
+                theme = theme,
+                onToggleTheme = {
+                    val next = if (theme == "light") "dark" else "light"
+                    settings.theme = next
+                    onThemeChange(next)
+                },
+                post = post,
+                busy = busy,
+                progress = progress,
+                log = log,
+                installed = installed,
+                onDownload = {
+                    (post?.postUrl ?: post?.links?.firstOrNull()?.url)?.let(onOpenUrl)
+                },
+                onImport = ::import,
+                keepScreenOn = keepScreenOn,
+                onKeepScreenOn = { keepScreenOn = it },
+                onFinish = {
+                    settings.keepScreenOn = keepScreenOn
+                    onFinish()
+                },
+            )
+            if (showLanguage) {
+                AlertDialog(
+                    onDismissRequest = { showLanguage = false },
+                    title = { Text(launcherStrings(language).languageTitle) },
+                    text = { LanguageOptions(language) { mode -> language = mode; settings.language = mode; showLanguage = false } },
+                    confirmButton = { TextButton(onClick = { showLanguage = false }) { Text(launcherStrings(language).close) } },
+                )
+            }
+        }
+        return
+    }
+
     val animatedProgress by animateFloatAsState(
         targetValue = (step + 1) / 3f,
         animationSpec = spring(stiffness = Spring.StiffnessLow),
@@ -563,6 +606,325 @@ private fun Onboarding(
             )
         }
     }
+    }
+}
+
+@Composable
+private fun LanguageOptions(selected: String, onPick: (String) -> Unit) {
+    val t = LocalLauncherStrings.current
+    Column {
+        listOf(
+            "auto" to (t.languageAuto to t.languageAutoSubtitle),
+            "es" to (t.languageSpanish to t.languageSpanishSubtitle),
+            "en" to (t.languageEnglish to t.languageEnglishSubtitle),
+        ).forEachIndexed { index, (mode, titles) ->
+            ChoiceRow(
+                icon = Icons.Filled.Language,
+                title = titles.first,
+                subtitle = titles.second,
+                selected = selected == mode,
+                items = 3,
+                index = index,
+            ) { onPick(mode) }
+        }
+    }
+}
+
+@Composable
+private fun DesktopOnboarding(
+    logo: Painter?,
+    language: String,
+    onLanguage: () -> Unit,
+    theme: String,
+    onToggleTheme: () -> Unit,
+    post: BlogPost?,
+    busy: Boolean,
+    progress: Int,
+    log: List<String>,
+    installed: GameStatus.Ready?,
+    onDownload: () -> Unit,
+    onImport: () -> Unit,
+    keepScreenOn: Boolean,
+    onKeepScreenOn: (Boolean) -> Unit,
+    onFinish: () -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val display = reloadedDisplayFont()
+    val t = LocalLauncherStrings.current
+    val downloadUrl = post?.postUrl ?: post?.links?.firstOrNull()?.url
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(scheme.surface),
+    ) {
+        OnboardingBackdrop()
+
+        Column(Modifier.fillMaxSize()) {
+            // Barra superior
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 32.dp, vertical = 20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Spacer(Modifier.weight(1f))
+                Surface(
+                    onClick = onToggleTheme,
+                    shape = CircleShape,
+                    color = scheme.surfaceContainerHigh,
+                    modifier = Modifier.size(40.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            if (theme == "light") Icons.Filled.DarkMode else Icons.Filled.LightMode,
+                            contentDescription = t.lightTheme,
+                            modifier = Modifier.size(18.dp),
+                            tint = scheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Spacer(Modifier.width(10.dp))
+                Surface(
+                    onClick = onLanguage,
+                    shape = RoundedCornerShape(999.dp),
+                    color = scheme.surfaceContainerHigh,
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.Language, contentDescription = null, modifier = Modifier.size(16.dp), tint = scheme.onSurfaceVariant)
+                        Spacer(Modifier.width(7.dp))
+                        Text(
+                            when (language) {
+                                "es" -> "Español"
+                                "en" -> "English"
+                                else -> t.language
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
+                }
+            }
+
+            // Cuerpo a dos columnas
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(horizontal = 48.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Columna izquierda: marca
+                Column(Modifier.weight(1f)) {
+                    if (logo != null) {
+                        Image(
+                            painter = logo,
+                            contentDescription = null,
+                            modifier = Modifier.size(88.dp).clip(RoundedCornerShape(22.dp)),
+                            contentScale = ContentScale.Crop,
+                        )
+                        Spacer(Modifier.height(22.dp))
+                    }
+                    Text(
+                        t.welcomeTo,
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontFamily = display,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 3.sp,
+                        ),
+                        color = scheme.onSurfaceVariant,
+                    )
+                    Text(
+                        t.brandTitle,
+                        style = MaterialTheme.typography.displayLarge.copy(
+                            fontFamily = display,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 0.5.sp,
+                            lineHeight = 78.sp,
+                        ),
+                        color = scheme.onSurface,
+                    )
+                    Spacer(Modifier.height(18.dp))
+                    Text(
+                        t.welcomeSubtitle,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = scheme.onSurfaceVariant,
+                        modifier = Modifier.widthIn(max = 460.dp),
+                    )
+                    Spacer(Modifier.height(28.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        DesktopFeatureChip(Icons.Filled.Memory, "Motor nativo en Rust")
+                        DesktopFeatureChip(Icons.Filled.Speed, "Más de 30 FPS")
+                        DesktopFeatureChip(Icons.Filled.Save, "Partidas portables")
+                    }
+                }
+
+                Spacer(Modifier.width(48.dp))
+
+                // Columna derecha: tarjeta de acción
+                Column(Modifier.width(420.dp)) {
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = scheme.surfaceContainerLow,
+                        border = BorderStroke(1.dp, scheme.outlineVariant),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Text(
+                                "Primeros pasos",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = scheme.primary,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                if (installed != null) "Todo listo para jugar" else t.installTitle,
+                                style = MaterialTheme.typography.headlineSmall.copy(
+                                    fontFamily = display,
+                                    fontWeight = FontWeight.Black,
+                                ),
+                            )
+
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = scheme.surfaceContainerHigh,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Box(
+                                        Modifier
+                                            .size(9.dp)
+                                            .background(
+                                                if (installed != null) scheme.primary else scheme.error,
+                                                CircleShape,
+                                            ),
+                                    )
+                                    Spacer(Modifier.width(12.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            if (installed != null) t.gameReady else t.noGame,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                        Text(
+                                            if (installed != null) {
+                                                "${installed.version ?: "?"} · ${formatBytes(installed.sizeBytes)}"
+                                            } else {
+                                                t.importToContinue
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = scheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (busy) {
+                                LinearProgressIndicator(
+                                    progress = { progress / 100f },
+                                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(999.dp)),
+                                    gapSize = 0.dp,
+                                    drawStopIndicator = {},
+                                )
+                                Text(
+                                    "${t.importing} $progress %",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = scheme.onSurfaceVariant,
+                                )
+                            }
+
+                            Button(
+                                onClick = onDownload,
+                                enabled = downloadUrl != null && !busy,
+                                modifier = Modifier.fillMaxWidth().height(50.dp),
+                                shape = RoundedCornerShape(13.dp),
+                            ) {
+                                Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(if (post?.version != null) "${t.download} ${post.version}" else t.downloadFromBlog)
+                            }
+                            OutlinedButton(
+                                onClick = onImport,
+                                enabled = !busy,
+                                modifier = Modifier.fillMaxWidth().height(50.dp),
+                                shape = RoundedCornerShape(13.dp),
+                            ) {
+                                Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(if (busy) t.importing else t.importZip)
+                            }
+
+                            HorizontalDivider(color = scheme.outlineVariant.copy(alpha = 0.6f))
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.LightMode, contentDescription = null, modifier = Modifier.size(18.dp), tint = scheme.onSurfaceVariant)
+                                Spacer(Modifier.width(10.dp))
+                                Text(
+                                    t.keepScreenOn,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Switch(checked = keepScreenOn, onCheckedChange = onKeepScreenOn)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Pie con botón
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 48.dp, vertical = 24.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    t.canChangeLater,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = scheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.weight(1f))
+                Button(
+                    onClick = onFinish,
+                    enabled = !busy,
+                    modifier = Modifier.width(240.dp).height(52.dp),
+                    shape = RoundedCornerShape(13.dp),
+                ) {
+                    Text(
+                        if (installed != null) t.startPlaying else t.continueLabel,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, modifier = Modifier.size(18.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DesktopFeatureChip(icon: ImageVector, text: String) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = scheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.7f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(15.dp), tint = scheme.primary)
+            Spacer(Modifier.width(7.dp))
+            Text(text, style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant)
+        }
     }
 }
 
