@@ -1,6 +1,7 @@
 package com.klisee.reloaded.gmk
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -13,6 +14,12 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -282,6 +289,7 @@ fun App(
             when (target) {
                 AppTab.Home -> HomeScreen(
                     repo = repo,
+                    onlineEngine = onlineEngine,
                     revision = revision,
                     launching = launching,
                     wide = wide,
@@ -1363,6 +1371,34 @@ private fun OnboardingFooter(
     }
 }
 
+@Composable
+private fun OnlineStatusPill(enabled: Boolean) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = if (enabled) scheme.primary.copy(alpha = 0.22f) else scheme.onSurface.copy(alpha = 0.10f),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(if (enabled) scheme.primary else scheme.onSurfaceVariant),
+            )
+            Spacer(Modifier.width(5.dp))
+            Text(
+                if (enabled) "Activado" else "Desactivado",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (enabled) scheme.primary else scheme.onSurfaceVariant,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HomeScreen(
@@ -1380,10 +1416,14 @@ private fun HomeScreen(
     networkGranted: Boolean,
     onRequestNetwork: () -> Unit,
     logo: Painter? = null,
+    onlineEngine: OnlineEngineStore? = null,
 ) {
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val liquid = LocalLiquidGlass.current
+    val onlineEnabled = remember(revision, onlineEngine) {
+        onlineEngine?.load()?.enabled == true
+    }
     var status by remember(revision) { mutableStateOf(repo.status()) }
     var busy by remember { mutableStateOf(false) }
     var progress by remember { mutableStateOf<Int?>(null) }
@@ -1702,6 +1742,7 @@ private fun HomeScreen(
                         onDownload = { downloadUrl?.let(onOpenUrl) },
                         onImport = ::importGame,
                         onOnline = onOnline,
+                        onlineEnabled = onlineEnabled,
                     )
                 }
             }
@@ -1827,6 +1868,7 @@ private fun HomeScreen(
                         onDownload = { downloadUrl?.let(onOpenUrl) },
                         onImport = ::importGame,
                         onOnline = onOnline,
+                        onlineEnabled = onlineEnabled,
                     )
                     news()
                     Spacer(Modifier.height(12.dp))
@@ -1893,6 +1935,7 @@ private fun MaterialHomeHero(
     onDownload: () -> Unit,
     onImport: () -> Unit,
     onOnline: () -> Unit,
+    onlineEnabled: Boolean = false,
 ) {
     val canPlay = installed != null && !busy && !launching
     val shape = RoundedCornerShape(36.dp)
@@ -2077,6 +2120,8 @@ private fun MaterialHomeHero(
                 Icon(Icons.Filled.Language, contentDescription = null, modifier = Modifier.size(19.dp))
                 Spacer(Modifier.width(9.dp))
                 Text("Reloaded Online", fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(8.dp))
+                OnlineStatusPill(onlineEnabled)
                 Spacer(Modifier.weight(1f))
                 Icon(
                     Icons.AutoMirrored.Filled.KeyboardArrowRight,
@@ -2228,6 +2273,7 @@ private fun DesktopHeroCard(
     onDownload: () -> Unit,
     onImport: () -> Unit,
     onOnline: () -> Unit,
+    onlineEnabled: Boolean = false,
 ) {
     val scheme = MaterialTheme.colorScheme
     val canPlay = installed != null && !busy && !launching
@@ -2394,6 +2440,8 @@ private fun DesktopHeroCard(
                 Icon(Icons.Filled.Language, contentDescription = null, modifier = Modifier.size(19.dp))
                 Spacer(Modifier.width(9.dp))
                 Text("Reloaded Online", fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(8.dp))
+                OnlineStatusPill(onlineEnabled)
                 Spacer(Modifier.weight(1f))
                 Icon(
                     Icons.AutoMirrored.Filled.KeyboardArrowRight,
@@ -4509,48 +4557,47 @@ private fun OnlineScreen(
     onLaunch: () -> Unit,
     onBack: () -> Unit,
 ) {
-    var config by remember(engine) { mutableStateOf((engine?.load() ?: OnlineEngineConfig()).normalized()) }
+    var config by remember(engine) {
+        mutableStateOf((engine?.load() ?: OnlineEngineConfig()).normalized().withProtocol(OnlineEngineConfig.PROTOCOL_ZIBELAN))
+    }
     var error by remember { mutableStateOf<String?>(null) }
     var statusText by remember { mutableStateOf("Leyendo el estado del motor…") }
     var statusNonce by remember { mutableStateOf(0) }
+    var saved by remember { mutableStateOf(false) }
     val installed = remember { repo.status() is GameStatus.Ready }
-    val protocol = OnlineEngineConfig.normalizeProtocol(config.protocol)
-    val zibelan = protocol == OnlineEngineConfig.PROTOCOL_ZIBELAN
-    val serverValid = OnlineEngineConfig.isValidServer(config.server)
-    val stateLabel = when {
-        engine == null -> "No disponible en esta plataforma"
-        !installed -> "Juego no instalado"
-        !config.enabled -> "Desactivado"
-        !serverValid -> "Revisá el servidor"
-        zibelan -> "Zibelan listo al iniciar"
-        else -> "Relay listo al iniciar"
-    }
-    val stateColor = when {
-        !installed || (engine != null && !serverValid) -> MaterialTheme.colorScheme.error
-        engine == null || !config.enabled -> MaterialTheme.colorScheme.outline
-        else -> MaterialTheme.colorScheme.primary
-    }
+    val scheme = MaterialTheme.colorScheme
+    val display = reloadedDisplayFont()
+    val haptics = rememberInterfaceHaptics()
 
     LaunchedEffect(statusNonce) {
         statusText = withContext(Dispatchers.IO) { onlineEngineEvents(readLog(repo)) }
     }
 
-    fun save(start: Boolean) {
+    val stateLabel = when {
+        engine == null -> "No disponible en esta plataforma"
+        !installed -> "Juego no instalado"
+        !config.enabled -> "Desactivado"
+        else -> "Activado"
+    }
+    val stateColor = when {
+        engine == null || !installed -> scheme.error
+        config.enabled -> scheme.primary
+        else -> scheme.outline
+    }
+
+    fun store(update: OnlineEngineConfig, launch: Boolean = false) {
         val store = engine ?: return
-        val next = config.normalized()
-        if (start && !installed) {
-            error = "Primero instala el juego para usar Reloaded Online."
-            return
-        }
-        if (start && !OnlineEngineConfig.isValidServer(next.server)) {
-            error = "El servidor debe tener el formato host:puerto."
+        val next = update.normalized()
+        if (launch && !installed) {
+            error = "Primero instala el juego para jugar en línea."
             return
         }
         store.save(next).fold(
             onSuccess = {
                 config = next
                 error = null
-                if (start) onLaunch()
+                saved = true
+                if (launch) onLaunch()
             },
             onFailure = { error = it.message ?: "No pude guardar la configuración." },
         )
@@ -4560,7 +4607,13 @@ private fun OnlineScreen(
         topBar = {
             TopAppBar(
                 colors = reloadedTopBarColors(),
-                title = { Text("Reloaded Online", fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 2.dp)) },
+                title = {
+                    Text(
+                        "Reloaded Online",
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(start = 2.dp),
+                    )
+                },
                 navigationIcon = { CircleBackButton(onBack) },
             )
         },
@@ -4571,258 +4624,327 @@ private fun OnlineScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+                .padding(horizontal = 24.dp)
+                .padding(bottom = BottomNavSpace),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            Spacer(Modifier.height(4.dp))
+
+            // === Tarjeta principal con estado ===
             Surface(
-                shape = RoundedCornerShape(32.dp),
-                color = MaterialTheme.colorScheme.primaryContainer,
-                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(28.dp),
+                color = if (config.enabled) scheme.primaryContainer else scheme.surfaceContainerLow,
+                border = BorderStroke(
+                    1.dp,
+                    if (config.enabled) scheme.primary.copy(alpha = 0.45f) else scheme.outlineVariant,
+                ),
+                modifier = Modifier.fillMaxWidth().widthIn(max = 720.dp),
             ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
+                Column(Modifier.padding(28.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Surface(
                             shape = CircleShape,
-                            color = MaterialTheme.colorScheme.surface.copy(alpha = .55f),
-                            modifier = Modifier.size(58.dp),
+                            color = if (config.enabled) {
+                                scheme.primary.copy(alpha = 0.20f)
+                            } else {
+                                scheme.surfaceContainerHighest
+                            },
+                            modifier = Modifier.size(72.dp),
                         ) {
-                            Icon(
-                                Icons.Filled.Language,
-                                contentDescription = null,
-                                modifier = Modifier.padding(14.dp),
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            )
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Filled.Language,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(34.dp),
+                                    tint = if (config.enabled) scheme.primary else scheme.onSurfaceVariant,
+                                )
+                            }
                         }
-                        Spacer(Modifier.width(14.dp))
+                        Spacer(Modifier.width(18.dp))
                         Column(Modifier.weight(1f)) {
                             Text(
                                 "Reloaded Online",
-                                style = MaterialTheme.typography.headlineSmall,
-                                fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                style = MaterialTheme.typography.headlineSmall.copy(
+                                    fontFamily = display,
+                                    fontWeight = FontWeight.Black,
+                                ),
+                                color = if (config.enabled) scheme.onPrimaryContainer else scheme.onSurface,
                             )
+                            Spacer(Modifier.height(2.dp))
                             Text(
                                 "Mundo compartido",
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = .72f),
+                                color = if (config.enabled) {
+                                    scheme.onPrimaryContainer.copy(alpha = 0.7f)
+                                } else {
+                                    scheme.onSurfaceVariant
+                                },
                             )
                         }
                     }
+
                     Text(
-                        "Conecta con otras personas en el mismo mapa. El motor dibuja a los jugadores remotos y sincroniza el mundo.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = .72f),
+                        "Juega con otras personas en el mismo mapa. El motor dibuja a los demás jugadores y mantiene el mundo sincronizado.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (config.enabled) {
+                            scheme.onPrimaryContainer.copy(alpha = 0.8f)
+                        } else {
+                            scheme.onSurfaceVariant
+                        },
                     )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(
-                            Modifier
-                                .size(10.dp)
-                                .clip(CircleShape)
-                                .background(stateColor),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            stateLabel,
-                            style = MaterialTheme.typography.titleSmall,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            if (zibelan) "Zibelan" else "Relay",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = .72f),
-                        )
-                    }
+
+                    HorizontalDivider(
+                        color = if (config.enabled) {
+                            scheme.onPrimaryContainer.copy(alpha = 0.15f)
+                        } else {
+                            scheme.outlineVariant.copy(alpha = 0.6f)
+                        },
+                    )
+
+                    // Estado + interruptor grande
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text("Conectar al iniciar", style = MaterialTheme.typography.titleSmall)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(stateColor),
+                                )
+                                Spacer(Modifier.width(9.dp))
+                                Text(
+                                    stateLabel,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (config.enabled) scheme.onPrimaryContainer else scheme.onSurface,
+                                )
+                            }
+                            Spacer(Modifier.height(4.dp))
                             Text(
-                                "También podés elegirlo desde Multijugador.",
+                                if (config.enabled) {
+                                    "Se conectará automáticamente al abrir el juego."
+                                } else {
+                                    "Actívalo para conectar al iniciar el juego."
+                                },
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = .68f),
+                                color = if (config.enabled) {
+                                    scheme.onPrimaryContainer.copy(alpha = 0.7f)
+                                } else {
+                                    scheme.onSurfaceVariant
+                                },
                             )
                         }
+                        Spacer(Modifier.width(16.dp))
                         Switch(
                             checked = config.enabled,
-                            onCheckedChange = { config = config.copy(enabled = it) },
+                            onCheckedChange = {
+                                haptics.confirm()
+                                store(config.copy(enabled = it))
+                            },
+                            modifier = Modifier.scale(1.15f),
                         )
                     }
                 }
             }
 
-            SettingsGroup("Protocolo") {
-                ChoiceRow(
-                    Icons.Filled.Language,
-                    "Relay local",
-                    "Servidor reloaded-online-server, JSON por línea.",
-                    selected = !zibelan,
-                    items = 2,
-                    index = 0,
-                ) { config = config.withProtocol(OnlineEngineConfig.PROTOCOL_RELAY) }
-                ChoiceRow(
-                    Icons.Filled.SportsEsports,
-                    "Zibelan",
-                    "Protocolo nativo ROZ. Servidor público por defecto: ${OnlineEngineConfig.DEFAULT_ZIBELAN_SERVER}.",
-                    selected = zibelan,
-                    items = 2,
-                    index = 1,
-                ) { config = config.withProtocol(OnlineEngineConfig.PROTOCOL_ZIBELAN) }
-            }
-
-            OutlinedTextField(
-                value = config.server,
-                onValueChange = { config = config.copy(server = it, mode = config.protocol) },
-                label = { Text(if (zibelan) "Servidor Zibelan (host:puerto)" else "Servidor (host:puerto)") },
-                supportingText = {
-                    Text(
-                        when {
-                            config.server.isNotBlank() && !serverValid -> "Usá el formato host:puerto."
-                            zibelan -> "Por defecto: ${OnlineEngineConfig.DEFAULT_ZIBELAN_SERVER}"
-                            else -> "Ejemplo: 192.168.1.50:7777"
-                        },
-                    )
-                },
-                isError = config.server.isNotBlank() && !serverValid,
-                leadingIcon = { Icon(Icons.Filled.Storage, contentDescription = null) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedTextField(
-                value = config.name,
-                onValueChange = { config = config.copy(name = it) },
-                label = { Text("Tu nombre") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedTextField(
-                value = config.room,
-                onValueChange = { config = config.copy(room = it) },
-                label = { Text("Sala") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            if (error != null) {
+            // === Nombre personalizado ===
+            Column(
+                modifier = Modifier.fillMaxWidth().widthIn(max = 720.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 Text(
-                    error!!,
+                    "TU NOMBRE EN EL MUNDO",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = scheme.onSurfaceVariant,
+                )
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = scheme.surfaceContainerLow,
+                    border = BorderStroke(1.dp, scheme.outlineVariant),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Filled.Person,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                            tint = scheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.width(14.dp))
+                        BasicTextField(
+                            value = config.name,
+                            onValueChange = {
+                                config = config.copy(name = it.take(16))
+                                saved = false
+                            },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.titleMedium.copy(color = scheme.onSurface),
+                            cursorBrush = SolidColor(scheme.primary),
+                            modifier = Modifier.weight(1f).padding(vertical = 12.dp),
+                            decorationBox = { inner ->
+                                if (config.name.isBlank()) {
+                                    Text(
+                                        "Escribe tu nombre…",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = scheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    )
+                                }
+                                inner()
+                            },
+                        )
+                        Text(
+                            "${config.name.length}/16",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = scheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Text(
+                    "Así te verán los demás jugadores. Se guarda al instante.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
+                    color = scheme.onSurfaceVariant,
                 )
             }
 
-            Surface(
-                shape = RoundedCornerShape(24.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(9.dp),
+            // === Estado guardado / error ===
+            if (error != null) {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = scheme.errorContainer,
+                    modifier = Modifier.fillMaxWidth().widthIn(max = 720.dp),
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            Modifier
-                                .size(10.dp)
-                                .clip(CircleShape)
-                                .background(stateColor),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            "Estado de conexión",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            if (zibelan) "Zibelan" else "Relay",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
+                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Info, contentDescription = null, tint = scheme.onErrorContainer, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Text(error!!, style = MaterialTheme.typography.bodySmall, color = scheme.onErrorContainer)
                     }
+                }
+            } else if (saved) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().widthIn(max = 720.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.Check, contentDescription = null, tint = scheme.primary, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
                     Text(
-                        "$stateLabel · ${if (config.enabled) "auto-conexión activada" else "auto-conexión desactivada"}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        "Cambios guardados",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = scheme.primary,
                     )
+                }
+            }
+
+            // === Botones ===
+            Column(
+                modifier = Modifier.fillMaxWidth().widthIn(max = 720.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Button(
+                    onClick = { haptics.confirm(); store(config, launch = true) },
+                    enabled = installed && engine != null,
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = scheme.primaryFixed,
+                        contentColor = scheme.onPrimaryFixed,
+                    ),
+                ) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(22.dp))
+                    Spacer(Modifier.width(9.dp))
                     Text(
-                        "Servidor: ${config.server.ifBlank { "sin configurar" }}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        "Guardar y jugar",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
                     )
+                }
+                OutlinedButton(
+                    onClick = { store(config) },
+                    enabled = engine != null,
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    Text("Guardar sin jugar")
+                }
+                if (!installed) {
                     Text(
-                        "Nombre: ${config.name.ifBlank { "sin configurar" }} · Sala: ${config.room.ifBlank { "sin configurar" }}",
+                        "Instala el juego para poder jugar en línea.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = scheme.error,
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Center,
                     )
-                    HorizontalDivider()
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "Últimos eventos del motor",
-                            style = MaterialTheme.typography.titleSmall,
-                            modifier = Modifier.weight(1f),
-                        )
-                        TextButton(onClick = { statusNonce++ }) {
-                            Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(17.dp))
-                            Spacer(Modifier.width(5.dp))
-                            Text("Actualizar")
+                }
+            }
+
+            // === Detalles técnicos (plegables) ===
+            var showDetails by remember { mutableStateOf(false) }
+            Column(
+                modifier = Modifier.fillMaxWidth().widthIn(max = 720.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                TextButton(
+                    onClick = { showDetails = !showDetails },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(
+                        if (showDetails) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (showDetails) "Ocultar detalles" else "Detalles técnicos")
+                }
+                AnimatedVisibility(visible = showDetails) {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = scheme.surfaceContainerLow,
+                        border = BorderStroke(1.dp, scheme.outlineVariant),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "Últimos eventos del motor",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TextButton(onClick = { statusNonce++ }) {
+                                    Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(5.dp))
+                                    Text("Actualizar", style = MaterialTheme.typography.labelMedium)
+                                }
+                            }
+                            Text(
+                                statusText,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp,
+                                color = scheme.onSurfaceVariant,
+                            )
+                            HorizontalDivider()
+                            Text(
+                                "Servidor: ${if (config.server == OnlineEngineConfig.DEFAULT_ZIBELAN_SERVER) "comunitario de Zibelan" else "personalizado"} · Sala: ${config.room.ifBlank { "mundo" }}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = scheme.onSurfaceVariant,
+                            )
                         }
                     }
-                    Text(
-                        statusText,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        "El estado en vivo también aparece en el menú Multijugador del juego y en Logs.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             }
 
-            Button(
-                onClick = { save(true) },
-                enabled = installed && engine != null,
-                modifier = Modifier.fillMaxWidth().height(60.dp),
-                shape = RoundedCornerShape(20.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primaryFixed,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryFixed,
-                ),
-            ) {
-                Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(24.dp))
-                Spacer(Modifier.width(9.dp))
-                Text("Guardar y jugar", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            }
-            OutlinedButton(
-                onClick = { save(false) },
-                enabled = engine != null,
-                modifier = Modifier.fillMaxWidth().height(50.dp),
-                shape = RoundedCornerShape(17.dp),
-            ) {
-                Text("Guardar sin jugar")
-            }
-            if (!installed) {
-                Text(
-                    "Primero instala el juego para usar Reloaded Online.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
             Text(
-                "El servidor no está incluido en la app. En Relay ejecutá reloaded-online-server en la PC o en el host donde quieras alojar el mundo. En Zibelan la app solo guarda el modo y el servidor; el motor nativo hace la conexión. El servidor comunitario por defecto es ${OnlineEngineConfig.DEFAULT_ZIBELAN_SERVER}.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                "El servidor Zibelan lo aloja la comunidad. Reloaded Online solo guarda tu nombre y la conexión; el motor nativo se encarga del resto.",
+                style = MaterialTheme.typography.labelSmall,
+                color = scheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
             )
         }
     }
@@ -4844,7 +4966,6 @@ private fun onlineEngineEvents(log: String): String {
         events.takeLast(4).joinToString("\n")
     }
 }
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
