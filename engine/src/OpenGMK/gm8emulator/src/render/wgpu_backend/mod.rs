@@ -37,17 +37,132 @@ impl RendererImpl {
         window: &Window,
         clear_colour: Colour,
     ) -> Result<Self, String> {
-        let _ = (connection, window);
+        let _ = connection;
 
-        // TODO(wgpu): crear la instancia con las extensiones de superficie adecuadas:
-        //   let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-        //       backends: wgpu::Backends::VULKAN | wgpu::Backends::GL,
-        //       ..Default::default()
-        //   });
-        // Después: `instance.create_surface(window)` aprovechando que `ramen` implementa
-        // `HasWindowHandle`/`HasDisplayHandle` con la feature `rwh-06`.
-        let _ = options;
-        Err("El backend wgpu todavía no está implementado.".into())
+        // `wgpu` entrega futuros que en el backend nativo (`wgpu-core`) resuelven de forma
+        // síncrona (`ready`). Aun así los sondeamos con un waker noop para no añadir una
+        // dependencia de runtime asíncrono.
+        fn block_on<F: std::future::Future>(fut: F) -> F::Output {
+            let mut fut = std::pin::pin!(fut);
+            let waker = std::task::Waker::noop();
+            let mut cx = std::task::Context::from_waker(waker);
+            loop {
+                match fut.as_mut().poll(&mut cx) {
+                    std::task::Poll::Ready(value) => return value,
+                    std::task::Poll::Pending => std::thread::yield_now(),
+                }
+            }
+        }
+
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::VULKAN | wgpu::Backends::GL,
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
+
+        // `ramen::window::Window` no implementa `Clone`, así que no podemos pasarla por valor
+        // (que es lo que haría que wgpu la mantuviera viva y la surface fuese `'static`).
+        // En su lugar construimos la surface desde los handles crudos y reclamamos `'static`.
+        //
+        // SAFETY: `SurfaceTargetUnsafe::from_window` solo lee el handle nativo; la ventana
+        // (y su conexión de display) sigue siendo dueña del mismo. En el motor la `Window`
+        // se crea antes que el `Renderer` y se destruye después (en `Game`, el campo
+        // `renderer` se declara antes que `window`), de modo que la surface nunca sobrevive
+        // a la ventana. Todo acceso a la surface ocurre desde el hilo principal.
+        let surface: wgpu::Surface<'static> = unsafe {
+            let target = wgpu::SurfaceTargetUnsafe::from_window(window)
+                .map_err(|e| format!("wgpu: no se pudo obtener el handle nativo de la ventana: {e}"))?;
+            instance
+                .create_surface_unsafe(target)
+                .map_err(|e| format!("wgpu: no se pudo crear la surface: {e}"))?
+        };
+
+        let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            force_fallback_adapter: false,
+            compatible_surface: Some(&surface),
+            ..Default::default()
+        }))
+        .map_err(|e| format!("wgpu: no hay adaptador compatible: {e}"))?;
+
+        let info = adapter.get_info();
+        // `AdapterInfo` de wgpu 30 ya no expone `api_version`; el driver y su `driver_info`
+        // (donde Vulkan/GLES incluyen la versión de API) son el equivalente disponible.
+        eprintln!(
+            "wgpu: backend {:?} | dispositivo: {} | tipo: {:?} | driver: {} | API: {}",
+            info.backend, info.name, info.device_type, info.driver, info.driver_info
+        );
+
+        let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("OpenGMK wgpu device"),
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
+            ..Default::default()
+        }))
+        .map_err(|e| format!("wgpu: no se pudo crear el dispositivo: {e}"))?;
+
+        let caps = surface.get_capabilities(&adapter);
+        if caps.formats.is_empty() {
+            return Err("wgpu: la surface no soporta ningún formato de textura".into());
+        }
+
+        // Preferimos formatos no-sRGB: el motor ya trabaja en espacio linear y no queremos
+        // que el swapchain aplique una conversión sRGB extra a los colores.
+        let format = caps
+            .formats
+            .iter()
+            .copied()
+            .find(|f| *f == wgpu::TextureFormat::Bgra8Unorm)
+            .or_else(|| caps.formats.iter().copied().find(|f| *f == wgpu::TextureFormat::Rgba8Unorm))
+            .or_else(|| caps.formats.iter().copied().find(|f| !f.is_srgb()))
+            .unwrap_or(caps.formats[0]);
+
+        // `AutoVsync`/`AutoNoVsync` son los únicos modos con fallback garantizado, así que
+        // no hace falta comprobarlos contra `caps.present_modes`.
+        let present_mode = if options.vsync {
+            wgpu::PresentMode::AutoVsync
+        } else {
+            wgpu::PresentMode::AutoNoVsync
+        };
+
+        let alpha_mode = caps.alpha_modes.first().copied().unwrap_or(wgpu::CompositeAlphaMode::Auto);
+
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format,
+            color_space: wgpu::SurfaceColorSpace::Auto,
+            width: options.size.0.max(1),
+            height: options.size.1.max(1),
+            desired_maximum_frame_latency: 2,
+            present_mode,
+            alpha_mode,
+            view_formats: vec![],
+        };
+        surface.configure(&device, &config);
+
+        eprintln!(
+            "wgpu: surface {}x{} | formato {:?} | present {:?} | alpha {:?}",
+            config.width, config.height, config.format, config.present_mode, config.alpha_mode
+        );
+
+        let max_texture_size = device.limits().max_texture_dimension_2d;
+        let textures = atlas::TextureStore::new();
+
+        let pipeline = {
+            // TODO(otro agente: pipeline)
+            todo!("wgpu: SpritePipeline::new lo está escribiendo otro agente")
+        };
+
+        Ok(Self {
+            device,
+            queue,
+            surface,
+            config,
+            pipeline,
+            textures,
+            clear_colour,
+            vsync: options.vsync,
+            max_texture_size,
+        })
     }
 }
 

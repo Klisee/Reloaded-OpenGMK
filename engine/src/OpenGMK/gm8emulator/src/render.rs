@@ -308,7 +308,7 @@ impl From<PrimitiveType> for PrimitiveShape {
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[repr(C)]
-struct Vertex {
+pub struct Vertex {
     pub pos: [f32; 3],
     /// How far this vertex was from where it should be, in world pixels, when it was submitted.
     ///
@@ -322,6 +322,16 @@ struct Vertex {
     pub blend: [f32; 4],
     pub atlas_xywh: [f32; 4],
     pub normal: [f32; 3],
+}
+
+impl Vertex {
+    pub const STRIDE: usize = std::mem::size_of::<Vertex>();
+    pub const POS_OFFSET: usize = std::mem::offset_of!(Vertex, pos);
+    pub const INTERP_OFFSET: usize = std::mem::offset_of!(Vertex, interp);
+    pub const TEX_OFFSET: usize = std::mem::offset_of!(Vertex, tex_coord);
+    pub const BLEND_OFFSET: usize = std::mem::offset_of!(Vertex, blend);
+    pub const ATLAS_OFFSET: usize = std::mem::offset_of!(Vertex, atlas_xywh);
+    pub const NORMAL_OFFSET: usize = std::mem::offset_of!(Vertex, normal);
 }
 
 /// A builder to be used for building primitives.
@@ -401,6 +411,14 @@ pub struct VertexBuffer {
     points: Vec<Vertex>,
     lines: Vec<Vertex>,
     tris: Vec<Vertex>,
+}
+
+impl VertexBuffer {
+    /// Vértices de puntos, líneas y triángulos, en ese orden. Un backend necesita este acceso
+    /// para subirlos a la GPU sin depender de la representación interna.
+    pub fn slices(&self) -> (&[Vertex], &[Vertex], &[Vertex]) {
+        (&self.points, &self.lines, &self.tris)
+    }
 }
 
 pub struct Renderer(Box<dyn RendererTrait>);
