@@ -15,6 +15,9 @@ use crate::{
 #[cfg(feature = "input")]
 use crate::input::{Key, MouseButton};
 
+#[cfg(feature = "rwh-06")]
+use std::num::NonZeroIsize;
+
 use std::{cell::UnsafeCell, mem, ptr};
 
 /// TODO: yeah
@@ -602,6 +605,26 @@ impl Window {
 
     pub(crate) fn hwnd(&self) -> HWND {
         self.hwnd
+    }
+
+    #[cfg(feature = "rwh-06")]
+    pub(crate) fn rwh_window_handle(
+        &self,
+    ) -> Result<raw_window_handle::RawWindowHandle, raw_window_handle::HandleError> {
+        let hwnd = NonZeroIsize::new(self.hwnd as isize)
+            .ok_or(raw_window_handle::HandleError::Unavailable)?;
+        let mut handle = raw_window_handle::Win32WindowHandle::new(hwnd);
+        handle.hinstance = NonZeroIsize::new(base_hinstance() as isize);
+        Ok(raw_window_handle::RawWindowHandle::Win32(handle))
+    }
+
+    #[cfg(feature = "rwh-06")]
+    pub(crate) fn rwh_display_handle(
+        &self,
+    ) -> Result<raw_window_handle::RawDisplayHandle, raw_window_handle::HandleError> {
+        Ok(raw_window_handle::RawDisplayHandle::Windows(
+            raw_window_handle::WindowsDisplayHandle::new(),
+        ))
     }
 }
 

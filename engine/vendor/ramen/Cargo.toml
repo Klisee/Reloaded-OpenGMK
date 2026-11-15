@@ -21,11 +21,18 @@ parking_lot = { version = "0.12", optional = true }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[dependencies.raw-window-handle]
+version = "0.6.2"
+optional = true
+default-features = false
+
 [features]
 default = ["input"]
 input = []
 nightly-rustdoc = []
 parking-lot = ["parking_lot"]
+# Expone HasWindowHandle/HasDisplayHandle para crear superficies Vulkan (wgpu/ash).
+rwh-06 = ["dep:raw-window-handle"]
 
 [package.metadata.docs.rs]
 features = ["nightly-rustdoc"]

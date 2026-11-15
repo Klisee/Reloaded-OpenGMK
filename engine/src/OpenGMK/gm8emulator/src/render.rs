@@ -1,7 +1,10 @@
 //! Game rendering functionality
+#![allow(unexpected_cfgs)]
 
 pub mod atlas;
 pub mod opengl;
+#[cfg(feature = "backend-wgpu")]
+pub mod wgpu_backend;
 
 use crate::types::Colour;
 use atlas::{AtlasRect, AtlasRef};
@@ -794,11 +797,53 @@ impl Default for RendererOptions {
     }
 }
 
+/// Backend de renderizado disponible.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RenderBackend {
+    /// OpenGL / OpenGL ES (backend histórico).
+    OpenGl,
+    /// wgpu (Vulkan, Metal, DX12 o GLES según la plataforma y el driver).
+    Wgpu,
+}
+
+impl RenderBackend {
+    /// Lee `OPENGMK_RENDERER` (valores: `gl`, `opengl`, `wgpu`, `auto`).
+    /// En `auto` o vacío devuelve `OpenGl` por ahora: wgpu todavía no está implementado.
+    pub fn from_env() -> Self {
+        match std::env::var("OPENGMK_RENDERER").unwrap_or_default().trim().to_ascii_lowercase().as_str() {
+            "wgpu" => Self::Wgpu,
+            _ => Self::OpenGl,
+        }
+    }
+
+    /// Si el backend se pidió explícitamente y no está compilado, devuelve un error legible.
+    pub fn resolve(self) -> Result<Self, String> {
+        match self {
+            Self::OpenGl => Ok(Self::OpenGl),
+            Self::Wgpu if cfg!(feature = "backend-wgpu") => Ok(Self::Wgpu),
+            Self::Wgpu => Err("El backend wgpu no está compilado; recompila con la feature `backend-wgpu`".into()),
+        }
+    }
+}
+
+/// Los llamadores históricos pasan `()`: se resuelve con `OPENGMK_RENDERER` como hasta ahora.
+impl From<()> for RenderBackend {
+    fn from(_: ()) -> Self {
+        Self::from_env()
+    }
+}
+
 impl Renderer {
-    pub fn new(backend: (), connection: &Connection, options: &RendererOptions, window: &Window, clear_colour: Colour) -> Result<Self, String> {
-        Ok(Self(Box::new(match backend {
-            () => opengl::RendererImpl::new(options, connection, window, clear_colour)?,
-        })))
+    pub fn new(backend: impl Into<RenderBackend>, connection: &Connection, options: &RendererOptions, window: &Window, clear_colour: Colour) -> Result<Self, String> {
+        let resolved = backend.into().resolve()?;
+        let renderer: Box<dyn RendererTrait> = match resolved {
+            RenderBackend::OpenGl => Box::new(opengl::RendererImpl::new(options, connection, window, clear_colour)?),
+            #[cfg(feature = "backend-wgpu")]
+            RenderBackend::Wgpu => Box::new(wgpu_backend::RendererImpl::new(options, connection, window, clear_colour)?),
+            #[cfg(not(feature = "backend-wgpu"))]
+            RenderBackend::Wgpu => return Err("Backend wgpu no disponible en esta compilación".into()),
+        };
+        Ok(Self(renderer))
     }
 
     pub fn max_texture_size(&self) -> u32 {
