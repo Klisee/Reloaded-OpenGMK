@@ -1,7 +1,10 @@
 //! Game rendering functionality
+#![allow(unexpected_cfgs)]
 
 pub mod atlas;
 pub mod opengl;
+#[cfg(feature = "backend-wgpu")]
+pub mod wgpu_backend;
 
 use crate::types::Colour;
 use atlas::{AtlasRect, AtlasRef};
@@ -305,7 +308,7 @@ impl From<PrimitiveType> for PrimitiveShape {
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[repr(C)]
-struct Vertex {
+pub struct Vertex {
     pub pos: [f32; 3],
     /// How far this vertex was from where it should be, in world pixels, when it was submitted.
     ///
@@ -319,6 +322,16 @@ struct Vertex {
     pub blend: [f32; 4],
     pub atlas_xywh: [f32; 4],
     pub normal: [f32; 3],
+}
+
+impl Vertex {
+    pub const STRIDE: usize = std::mem::size_of::<Vertex>();
+    pub const POS_OFFSET: usize = std::mem::offset_of!(Vertex, pos);
+    pub const INTERP_OFFSET: usize = std::mem::offset_of!(Vertex, interp);
+    pub const TEX_OFFSET: usize = std::mem::offset_of!(Vertex, tex_coord);
+    pub const BLEND_OFFSET: usize = std::mem::offset_of!(Vertex, blend);
+    pub const ATLAS_OFFSET: usize = std::mem::offset_of!(Vertex, atlas_xywh);
+    pub const NORMAL_OFFSET: usize = std::mem::offset_of!(Vertex, normal);
 }
 
 /// A builder to be used for building primitives.
@@ -398,6 +411,14 @@ pub struct VertexBuffer {
     points: Vec<Vertex>,
     lines: Vec<Vertex>,
     tris: Vec<Vertex>,
+}
+
+impl VertexBuffer {
+    /// Vértices de puntos, líneas y triángulos, en ese orden. Un backend necesita este acceso
+    /// para subirlos a la GPU sin depender de la representación interna.
+    pub fn slices(&self) -> (&[Vertex], &[Vertex], &[Vertex]) {
+        (&self.points, &self.lines, &self.tris)
+    }
 }
 
 pub struct Renderer(Box<dyn RendererTrait>);
@@ -794,11 +815,53 @@ impl Default for RendererOptions {
     }
 }
 
+/// Backend de renderizado disponible.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RenderBackend {
+    /// OpenGL / OpenGL ES (backend histórico).
+    OpenGl,
+    /// wgpu (Vulkan, Metal, DX12 o GLES según la plataforma y el driver).
+    Wgpu,
+}
+
+impl RenderBackend {
+    /// Lee `OPENGMK_RENDERER` (valores: `gl`, `opengl`, `wgpu`, `auto`).
+    /// En `auto` o vacío devuelve `OpenGl` por ahora: wgpu todavía no está implementado.
+    pub fn from_env() -> Self {
+        match std::env::var("OPENGMK_RENDERER").unwrap_or_default().trim().to_ascii_lowercase().as_str() {
+            "wgpu" => Self::Wgpu,
+            _ => Self::OpenGl,
+        }
+    }
+
+    /// Si el backend se pidió explícitamente y no está compilado, devuelve un error legible.
+    pub fn resolve(self) -> Result<Self, String> {
+        match self {
+            Self::OpenGl => Ok(Self::OpenGl),
+            Self::Wgpu if cfg!(feature = "backend-wgpu") => Ok(Self::Wgpu),
+            Self::Wgpu => Err("El backend wgpu no está compilado; recompila con la feature `backend-wgpu`".into()),
+        }
+    }
+}
+
+/// Los llamadores históricos pasan `()`: se resuelve con `OPENGMK_RENDERER` como hasta ahora.
+impl From<()> for RenderBackend {
+    fn from(_: ()) -> Self {
+        Self::from_env()
+    }
+}
+
 impl Renderer {
-    pub fn new(backend: (), connection: &Connection, options: &RendererOptions, window: &Window, clear_colour: Colour) -> Result<Self, String> {
-        Ok(Self(Box::new(match backend {
-            () => opengl::RendererImpl::new(options, connection, window, clear_colour)?,
-        })))
+    pub fn new(backend: impl Into<RenderBackend>, connection: &Connection, options: &RendererOptions, window: &Window, clear_colour: Colour) -> Result<Self, String> {
+        let resolved = backend.into().resolve()?;
+        let renderer: Box<dyn RendererTrait> = match resolved {
+            RenderBackend::OpenGl => Box::new(opengl::RendererImpl::new(options, connection, window, clear_colour)?),
+            #[cfg(feature = "backend-wgpu")]
+            RenderBackend::Wgpu => Box::new(wgpu_backend::RendererImpl::new(options, connection, window, clear_colour)?),
+            #[cfg(not(feature = "backend-wgpu"))]
+            RenderBackend::Wgpu => return Err("Backend wgpu no disponible en esta compilación".into()),
+        };
+        Ok(Self(renderer))
     }
 
     pub fn max_texture_size(&self) -> u32 {

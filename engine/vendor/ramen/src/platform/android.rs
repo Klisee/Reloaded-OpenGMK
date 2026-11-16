@@ -180,6 +180,32 @@ impl Window {
         self.native_window
     }
 
+    /// The window handle for `raw-window-handle` consumers (wgpu/ash).
+    ///
+    /// Android can replace the `ANativeWindow` on rotation, so the pointer stored here may be
+    /// stale: it is only valid while it still matches the live pointer in [`AppState`].
+    #[cfg(feature = "rwh-06")]
+    pub(crate) fn rwh_window_handle(
+        &self,
+    ) -> Result<raw_window_handle::RawWindowHandle, raw_window_handle::HandleError> {
+        let live = state().lock().unwrap().window;
+        if self.native_window.is_null() || !std::ptr::eq(self.native_window, live) {
+            return Err(raw_window_handle::HandleError::Unavailable)
+        }
+        let non_null_ptr = std::ptr::NonNull::new(self.native_window)
+            .ok_or(raw_window_handle::HandleError::Unavailable)?;
+        Ok(raw_window_handle::RawWindowHandle::AndroidNdk(
+            raw_window_handle::AndroidNdkWindowHandle::new(non_null_ptr),
+        ))
+    }
+
+    #[cfg(feature = "rwh-06")]
+    pub(crate) fn rwh_display_handle(
+        &self,
+    ) -> Result<raw_window_handle::RawDisplayHandle, raw_window_handle::HandleError> {
+        Ok(raw_window_handle::RawDisplayHandle::Android(raw_window_handle::AndroidDisplayHandle::new()))
+    }
+
     pub(crate) fn size(&self) -> (u32, u32) {
         let s = state().lock().unwrap();
         (s.width, s.height)

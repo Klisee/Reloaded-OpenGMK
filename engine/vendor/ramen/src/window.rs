@@ -188,3 +188,21 @@ impl Window {
         self.0.xid()
     }
 }
+
+#[cfg(feature = "rwh-06")]
+impl raw_window_handle::HasWindowHandle for Window {
+    fn window_handle(&self) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
+        let raw = self.0.rwh_window_handle()?;
+        // SAFETY: la Window es dueña del handle nativo durante todo el préstamo.
+        Ok(unsafe { raw_window_handle::WindowHandle::borrow_raw(raw) })
+    }
+}
+
+#[cfg(feature = "rwh-06")]
+impl raw_window_handle::HasDisplayHandle for Window {
+    fn display_handle(&self) -> Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError> {
+        let raw = self.0.rwh_display_handle()?;
+        // SAFETY: el display vive mientras viva la Window.
+        Ok(unsafe { raw_window_handle::DisplayHandle::borrow_raw(raw) })
+    }
+}

@@ -604,6 +604,24 @@ impl Window {
     pub(crate) fn xid(&self) -> xcb_window_t {
         self.details.handle
     }
+
+    #[cfg(feature = "rwh-06")]
+    pub(crate) fn rwh_window_handle(&self) -> Result<raw_window_handle::RawWindowHandle, raw_window_handle::HandleError> {
+        let mut handle = raw_window_handle::XlibWindowHandle::new(self.details.handle as core::ffi::c_ulong);
+        handle.visual_id = 0;
+        Ok(raw_window_handle::RawWindowHandle::Xlib(handle))
+    }
+
+    #[cfg(feature = "rwh-06")]
+    pub(crate) fn rwh_display_handle(&self) -> Result<raw_window_handle::RawDisplayHandle, raw_window_handle::HandleError> {
+        let connection_ = mutex_lock(&self.connection.0);
+        let display = core::ptr::NonNull::new(connection_.details.display as *mut core::ffi::c_void)
+            .ok_or(raw_window_handle::HandleError::Unavailable)?;
+        Ok(raw_window_handle::RawDisplayHandle::Xlib(raw_window_handle::XlibDisplayHandle::new(
+            Some(display),
+            connection_.details.screenid as core::ffi::c_int,
+        )))
+    }
 }
 
 impl Drop for Window {
