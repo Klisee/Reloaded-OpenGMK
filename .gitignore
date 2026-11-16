@@ -11,3 +11,6 @@ local.properties
 androidApp/keystore.properties
 *.jks
 *.keystore
+
+# notas locales de investigacion
+docs/investigacion/
