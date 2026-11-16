@@ -150,6 +150,34 @@ fn make_view_matrix(x: f64, y: f64, z: f64, w: f64, h: f64, angle: f64) -> [f32;
     )
 }
 
+/// Posee un `RawDisplayHandle` para poder pasárselo a `wgpu::InstanceDescriptor`, que exige
+/// un valor `'static`. El handle apunta a la conexión X11/Win32/Android que vive en la ventana;
+/// `RendererImpl` no sobrevive a la `Window`, así que el préstamo es válido.
+struct OwnedDisplay {
+    raw: raw_window_handle::RawDisplayHandle,
+}
+
+// SAFETY: el handle nativo (Display* de X11, HWND de Win32, ANativeWindow de Android) es válido
+// mientras viva la ventana, y el renderer se destruye antes que ella. Todo el render ocurre en
+// el hilo principal, que es el que creó la ventana.
+unsafe impl Send for OwnedDisplay {}
+unsafe impl Sync for OwnedDisplay {}
+
+impl std::fmt::Debug for OwnedDisplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("OwnedDisplay")
+    }
+}
+
+impl raw_window_handle::HasDisplayHandle for OwnedDisplay {
+    fn display_handle(
+        &self,
+    ) -> Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError> {
+        // SAFETY: el handle sigue siendo válido mientras exista la ventana que lo creó.
+        Ok(unsafe { raw_window_handle::DisplayHandle::borrow_raw(self.raw) })
+    }
+}
+
 pub struct RendererImpl {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -197,10 +225,26 @@ impl RendererImpl {
             }
         }
 
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN | wgpu::Backends::GL,
-            ..wgpu::InstanceDescriptor::new_without_display_handle()
-        });
+        // La instancia necesita el display handle: wgpu lo usa para crear superficies y para
+        // elegir las extensiones de instancia correctas (X11 en Linux). Sin él, `create_surface`
+        // falla con "No `DisplayHandle` is available".
+        // `InstanceDescriptor::display` es lo que permite crear la surface después; sin él,
+        // `create_surface` devuelve "No `DisplayHandle` is available". wgpu pide un
+        // `Box<dyn WgpuHasDisplayHandle>`, así que se envuelve el handle crudo en un tipo propio
+        // que lo posee (y por tanto puede ser 'static).
+        let raw_display = {
+            use raw_window_handle::HasDisplayHandle;
+            window
+                .display_handle()
+                .map_err(|e| format!("wgpu: la ventana no expone un display handle: {e}"))?
+                .as_raw()
+        };
+        let display = OwnedDisplay { raw: raw_display };
+
+        let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
+        desc.backends = wgpu::Backends::VULKAN | wgpu::Backends::GL;
+        desc.display = Some(Box::new(display));
+        let instance = wgpu::Instance::new(desc);
 
         // `ramen::window::Window` no implementa `Clone`, así que no podemos pasarla por valor
         // (que es lo que haría que wgpu la mantuviera viva y la surface fuese `'static`).
@@ -511,6 +555,14 @@ impl RendererImpl {
             });
         }
 
+        if std::env::var_os("OPENGMK_WGPU_DEBUG").is_some() {
+            eprintln!(
+                "[wgpu] frame: {} lotes, {} limpiezas, juego en {:?}",
+                self.frame.prepared.len(),
+                self.frame.clears.len(),
+                game
+            );
+        }
         let game_visible = self.viewport_for((0, 0, 0, 0), game).is_some();
         if !game_visible {
             self.queue.submit(Some(encoder.finish()));
