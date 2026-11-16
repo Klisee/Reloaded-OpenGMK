@@ -31,6 +31,14 @@ pub(crate) fn present(r: &mut RendererImpl, window_width: u32, window_height: u3
         // Termina el dibujo pendiente antes de tocar la surface.
         r.flush_now();
 
+        // OpenGL conserva el framebuffer entre frames, así que presentar sin haber dibujado deja
+        // la imagen anterior. En wgpu cada textura del swapchain llega vacía: presentar un frame
+        // sin contenido lo pintaría de negro. Con esto, los submenús que solo re-presentan (como
+        // "Cargar partida") mantienen la imagen en vez de quedarse en negro.
+        if r.frame.prepared.is_empty() && r.frame.clears.is_empty() {
+            return;
+        }
+
         // La surface ES la ventana: si cambió de tamaño desde el último frame, hay que
         // reconfigurarla antes de pedir la textura.
         if r.config.width != window_width || r.config.height != window_height {
