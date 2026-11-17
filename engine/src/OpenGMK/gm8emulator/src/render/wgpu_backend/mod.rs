@@ -668,6 +668,7 @@ impl RendererImpl {
             _ => wgpu::Backends::VULKAN | wgpu::Backends::GL,
         };
         desc.display = Some(Box::new(display));
+        let enabled_backends = desc.backends;
         let instance = wgpu::Instance::new(desc);
 
         // `ramen::window::Window` no implementa `Clone`, así que no podemos pasarla por valor
@@ -681,13 +682,47 @@ impl RendererImpl {
         // a la ventana. Todo acceso a la surface ocurre desde el hilo principal.
         let surface = create_surface(&instance, window)?;
 
-        let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            force_fallback_adapter: false,
-            compatible_surface: Some(&surface),
-            ..Default::default()
-        }))
-        .map_err(|e| format!("wgpu: no hay adaptador compatible: {e}"))?;
+        // `request_adapter` picks by raw performance and ignores the order of `desc.backends`, so
+        // it happily returned Vulkan on Windows with DX12 enabled. The adapter is chosen here
+        // instead, walking the backends in the order we want and taking the first one that can
+        // present to this surface. Power preference is kept as a second criterion inside a backend.
+        let wanted = [
+            wgpu::Backends::DX12,
+            wgpu::Backends::VULKAN,
+            wgpu::Backends::GL,
+        ];
+        let enabled = enabled_backends;
+        let mut adapter = None;
+        for backend in wanted {
+            if !enabled.contains(backend) {
+                continue;
+            }
+            let mut candidates: Vec<wgpu::Adapter> = block_on(instance.enumerate_adapters(backend));
+            // Discrete GPUs first, then anything else; the order within a backend is otherwise the
+            // driver's, which puts software adapters anywhere.
+            candidates.sort_by_key(|candidate| match candidate.get_info().device_type {
+                wgpu::DeviceType::DiscreteGpu => 0,
+                wgpu::DeviceType::IntegratedGpu => 1,
+                wgpu::DeviceType::VirtualGpu => 2,
+                wgpu::DeviceType::Cpu => 4,
+                wgpu::DeviceType::Other => 3,
+            });
+            let mut usable = candidates.into_iter().filter(|candidate| candidate.is_surface_supported(&surface));
+            if let Some(chosen) = usable.next() {
+                adapter = Some(chosen);
+                break
+            }
+        }
+        let adapter = match adapter {
+            Some(adapter) => adapter,
+            None => block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                force_fallback_adapter: false,
+                compatible_surface: Some(&surface),
+                ..Default::default()
+            }))
+            .map_err(|e| format!("wgpu: no hay adaptador compatible: {e}"))?,
+        };
 
         let info = adapter.get_info();
         // `AdapterInfo` de wgpu 30 ya no expone `api_version`; el driver y su `driver_info`
