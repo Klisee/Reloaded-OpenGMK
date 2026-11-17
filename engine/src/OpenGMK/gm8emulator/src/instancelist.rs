@@ -404,6 +404,15 @@ impl TileList {
         Self { chunks: ChunkList::new(), draw_order: Vec::new() }
     }
 
+    /// Number of live tiles. The overlay uses it, and it is cheaper than counting a drawing pass.
+    pub fn len(&self) -> usize {
+        self.draw_order.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.draw_order.is_empty()
+    }
+
     pub fn get(&self, idx: usize) -> &Tile {
         self.chunks.get(idx).unwrap_or_else(|| panic!("Invalid instance handle to TileList::get(): {}", idx))
     }

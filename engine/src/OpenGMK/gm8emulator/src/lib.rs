@@ -4,6 +4,12 @@
 //! entry point (`src/android_main.rs`) can share the same tree. [`run_game`] is the single
 //! entry point used by both.
 
+/// Version shown by the engine, the launcher and the debug overlay.
+///
+/// It is the project's own version, not the crate's: the crate keeps its upstream `0.2.0` so the
+/// fork is easy to line up with OpenGMK, while the product is 1.0.
+pub const VERSION: &str = "1.0";
+
 mod action;
 mod asset;
 pub(crate) mod battle_diag;

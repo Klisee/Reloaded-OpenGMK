@@ -268,6 +268,9 @@ impl Game {
         if self.show_fps {
             self.draw_fps_overlay();
         }
+        if self.debug_overlay {
+            self.draw_debug_overlay();
+        }
         if self.room.id == f3r::room::BOOT && self.mods_available() && !self.mods_menu_open {
             self.draw_mods_button();
         }
@@ -1004,6 +1007,273 @@ impl Game {
         self.draw_alpha = old_alpha;
         self.draw_halign = old_halign;
         self.draw_valign = old_valign;
+    }
+
+    /// The TAB debug overlay: the engine's own F3, in the spirit of Minecraft's.
+    ///
+    /// Everything here is read-only; it never touches game state. Unlike the game, the overlay is
+    /// emitted as quads in *window* pixels and handed to the renderer, which draws them after the
+    /// game has been scaled to the window. Drawing it in game pixels would magnify the text by the
+    /// scale factor and swamp the screen on a large window.
+    pub fn draw_debug_overlay(&mut self) {
+        // A bitmap font only stays crisp at an integer scale: at 1.25x some pixels double and
+        // others do not, which is what made the text look blurred. The font itself is picked by
+        // size instead, and drawn 1:1, so every texel lands on exactly one screen pixel.
+        let font_id = self.overlay_font_id();
+        let font = match self.assets.fonts.get_asset(font_id) {
+            Some(font) => font.clone(),
+            None => return,
+        };
+        let glyph_height = font.tallest_char_height.max(6) as f32;
+        let line_height = (glyph_height + 2.0).round();
+        let scale = 1.0;
+
+        let renderer = self.renderer.debug_info(
+            (self.unscaled_width, self.unscaled_height),
+            self.window_inner_size,
+            self.scaling,
+        );
+
+        let mut left = Vec::new();
+        left.push(format!("Reloaded OpenGMK {}", crate::VERSION));
+        left.push(format!("{} fps | pasos {} | room_speed {}", self.render_fps, self.fps, self.room.speed));
+        left.push(format!(
+            "ventana {}x{} | lienzo {}x{} | {}",
+            renderer.window.0, renderer.window.1, renderer.framebuffer.0, renderer.framebuffer.1, renderer.scaling
+        ));
+        left.push(format!("backend: {} | {}", renderer.backend, renderer.device));
+        if !renderer.api_version.is_empty() {
+            // The API line names the graphics API the backend is actually using and its version,
+            // so it reads "OpenGL 3.3.0 ..." on GL and "Vulkan 1.4.305" on wgpu.
+            left.push(format!("API: {} {} | driver: {}", renderer.backend, renderer.api_version, renderer.driver));
+        }
+        left.push(format!(
+            "modo: {:?} | vsync {} | textura max {}",
+            self.render_mode,
+            self.renderer.get_vsync(),
+            renderer.max_texture
+        ));
+        left.push(format!(
+            "lienzo intermedio: {} | pixeles interpolados: {}",
+            if renderer.offscreen { "si" } else { "no" },
+            self.renderer.get_pixel_interpolation()
+        ));
+        left.push(format!(
+            "instancias {} | tiles {} | particulas {}",
+            self.room.instance_list.count_all_active(),
+            self.tile_count(),
+            self.particle_count()
+        ));
+        if let Some(mb) = Self::process_memory_mb() {
+            left.push(format!("memoria {:.1} MB", mb));
+        }
+
+        let room_name = self
+            .assets
+            .rooms
+            .get_asset(self.room.id)
+            .map(|room| room.name.to_string())
+            .unwrap_or_else(|| format!("room {}", self.room.id));
+        let mut right = Vec::new();
+        right.push(format!("sala: {} ({})", room_name, self.room.id));
+        right.push(format!("{}x{} px | vista {}", self.room.width, self.room.height, self.view_current));
+        if let Some(view) = self.room.views.get(self.view_current) {
+            right.push(format!(
+                "vista fuente ({}, {}) {}x{}",
+                view.source_x, view.source_y, view.source_w, view.source_h
+            ));
+        }
+        if let Some((x, y)) = self.local_player_position() {
+            right.push(format!("jugador ({:.0}, {:.0})", x, y));
+        }
+        right.push(format!(
+            "profundidad {:.0} | perspectiva {} | zbuf {}",
+            self.renderer.get_depth(),
+            if self.renderer.get_perspective() { "si" } else { "no" },
+            if self.renderer.get_zbuf_trashed() { "descartado" } else { "ok" }
+        ));
+        if let Some(index) = self.global_number(f3r::global::PROTA_INDEX, 0) {
+            let outfit = self.global_number(f3r::global::PROTA_VESTUARIO, 0).unwrap_or(0);
+            right.push(format!("prota {} | vestuario {}", index, outfit));
+        }
+        right.push(format!("TAB para cerrar | {}", self.play_type_label()));
+
+        // Layout in window pixels. The panel is drawn with a translucent plate so the text is
+        // readable over any room.
+        let pad = 4.0;
+        let inset = 4.0;
+        let pad_x = (pad * 1.5_f32).round();
+        let line_height = (line_height * scale).max(glyph_height + 1.0);
+        let left_w = self.measure_overlay_lines(&left, &font, scale);
+        let right_w = self.measure_overlay_lines(&right, &font, scale);
+        let panel_h = (left.len().max(right.len()) as f32) * line_height + pad * 2.0;
+        let left_x = inset + pad_x;
+        let right_x = (self.window_inner_size.0 as f32 - right_w - pad_x - inset).max(left_x + left_w + pad_x * 2.0);
+
+        let mut quads = Vec::new();
+        let plate = [0.0, 0.0, 0.0, 0.72];
+        quads.push(crate::render::UiQuad {
+            rect: (left_x - pad_x, inset, left_w + pad_x * 2.0, panel_h),
+            atlas: None,
+            uv: (0.0, 0.0, 1.0, 1.0),
+            colour: plate,
+        });
+        quads.push(crate::render::UiQuad {
+            rect: (right_x - pad_x, inset, right_w + pad_x * 2.0, panel_h),
+            atlas: None,
+            uv: (0.0, 0.0, 1.0, 1.0),
+            colour: plate,
+        });
+        self.push_overlay_column(&mut quads, &left, &font, left_x, inset + pad, line_height, scale);
+        self.push_overlay_column(&mut quads, &right, &font, right_x, inset + pad, line_height, scale);
+
+        self.renderer.set_ui_quads(quads);
+    }
+
+    /// Number of tiles in the current room, for the overlay.
+    fn tile_count(&self) -> usize {
+        self.room.tile_list.len()
+    }
+
+    /// Number of live particles across every particle system, for the overlay.
+    fn particle_count(&self) -> usize {
+        self.particles.particle_count()
+    }
+
+    /// Resident memory of the process in MB, for the overlay. `None` where the platform does not
+    /// expose it, in which case the overlay leaves the line out.
+    #[cfg(target_os = "linux")]
+    fn process_memory_mb() -> Option<f64> {
+        let status = std::fs::read_to_string("/proc/self/status").ok()?;
+        let line = status.lines().find(|line| line.starts_with("VmRSS:"))?;
+        let kb: f64 = line.split_whitespace().nth(1)?.parse().ok()?;
+        Some(kb / 1024.0)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn process_memory_mb() -> Option<f64> {
+        None
+    }
+
+    /// Short label for how the game is being played, shown in the overlay.
+    fn play_type_label(&self) -> &'static str {
+        match self.play_type {
+            PlayType::Normal => "partida normal",
+            PlayType::Record => "grabando",
+            PlayType::Replay => "reproduciendo",
+        }
+    }
+
+    /// Picks the game's font that best fits the overlay.
+    ///
+    /// A bitmap font only stays crisp at 1:1, so the overlay never scales glyphs: it chooses one
+    /// of the game's own fonts instead. The preferred ones are plain text faces (the ones the game
+    /// uses for menus, dialogue and stats); among those, the tallest one that still leaves the
+    /// HUD compact (up to 20 px) wins, which is a touch larger than the 16 px UI font without
+    /// being decorative or oversized.
+    fn overlay_font_id(&self) -> i32 {
+        const PREFERRED: [&str; 8] =
+            ["Century", "FuenteDialogo", "FuenteStat", "FuenteDex", "Fuente1", "FuenteArea", "font_horascreen", "FuenteMenu"];
+        let font_at = |id: usize| self.assets.fonts.get(id).and_then(|font| font.as_ref());
+
+        let mut best: Option<(i32, u32)> = None;
+        for (id, font) in self.assets.fonts.iter().enumerate() {
+            let Some(font) = font.as_ref() else { continue };
+            let height = font.tallest_char_height;
+            if height < 10 || height > 20 {
+                continue;
+            }
+            let name = font.name.to_string();
+            if !PREFERRED.contains(&name.as_str()) {
+                continue;
+            }
+            if best.map(|(_, height)| font.tallest_char_height > height).unwrap_or(true) {
+                best = Some((id as i32, height));
+            }
+        }
+        // No preferred font in range: fall back to the largest small one, then to font 0.
+        if best.is_none() {
+            for (id, font) in self.assets.fonts.iter().enumerate() {
+                let Some(font) = font.as_ref() else { continue };
+                let height = font.tallest_char_height;
+                if (10..=20).contains(&height) && best.map(|(_, h)| height > h).unwrap_or(true) {
+                    best = Some((id as i32, height));
+                }
+            }
+        }
+        match best {
+            Some((id, _)) => id,
+            None if font_at(0).is_some() => 0,
+            None => -1,
+        }
+    }
+
+    /// Emits one column of overlay text as glyph quads, with a one-pixel drop shadow.
+    fn push_overlay_column(
+        &self,
+        out: &mut Vec<crate::render::UiQuad>,
+        lines: &[String],
+        font: &Font,
+        x: f32,
+        mut y: f32,
+        line_height: f32,
+        scale: f32,
+    ) {
+        for line in lines {
+            let text = line.as_bytes();
+            let mut cursor = 0.0;
+            for &byte in text {
+                let Some(character) = font.get_char(byte) else { continue };
+                let Some(rect) = self.renderer.get_rect(character.atlas_ref).copied() else { continue };
+                let (rx, ry, rw, rh) = rect.cell();
+                let (w, h) = (rw as f32 * scale, rh as f32 * scale);
+                // UVs: the glyph cell in its atlas, normalised by the atlas size.
+                let uv = self
+                    .renderer
+                    .atlas_size(rect.atlas_id())
+                    .map(|(aw, ah)| {
+                        let (aw, ah) = (aw.max(1) as f32, ah.max(1) as f32);
+                        (
+                            rx as f32 / aw,
+                            ry as f32 / ah,
+                            (rx + rw) as f32 / aw,
+                            (ry + rh) as f32 / ah,
+                        )
+                    })
+                    .unwrap_or((0.0, 0.0, 1.0, 1.0));
+                let glyph_x = x + cursor + character.distance as f32 * scale;
+                // Shadow first, then the glyph.
+                out.push(crate::render::UiQuad {
+                    rect: (glyph_x + 1.0, y + 1.0, w, h),
+                    atlas: Some(character.atlas_ref),
+                    uv,
+                    colour: [0.0, 0.0, 0.0, 1.0],
+                });
+                out.push(crate::render::UiQuad {
+                    rect: (glyph_x, y, w, h),
+                    atlas: Some(character.atlas_ref),
+                    uv,
+                    colour: [1.0, 1.0, 1.0, 1.0],
+                });
+                cursor += character.offset as f32 * scale;
+            }
+            y += line_height;
+        }
+    }
+
+    /// Width of the longest line of a column, in window pixels.
+    fn measure_overlay_lines(&self, lines: &[String], font: &Font, scale: f32) -> f32 {
+        let mut widest: f32 = 0.0;
+        for line in lines {
+            let mut width = 0.0;
+            for &byte in line.as_bytes() {
+                if let Some(character) = font.get_char(byte) {
+                    width += character.offset as f32 * scale;
+                }
+            }
+            widest = widest.max(width);
+        }
+        widest.max(1.0)
     }
 
     pub fn draw_instance_default(&mut self, idx: usize) -> gml::Result<()> {

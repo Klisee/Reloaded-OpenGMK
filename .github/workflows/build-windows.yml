@@ -37,7 +37,7 @@ jobs:
       - name: Build engine
         shell: pwsh
         run: |
-          cargo build --manifest-path engine/src/OpenGMK/Cargo.toml --release -p gm8emulator
+          cargo build --manifest-path engine/src/OpenGMK/Cargo.toml --release -p gm8emulator --features backend-wgpu
           Copy-Item engine/src/OpenGMK/target/release/gm8emulator.exe desktopApp/src/main/resources/gm8emulator.exe -Force
 
       - name: Verify engine

@@ -364,6 +364,26 @@ pub(crate) fn max_texture_size(r: &RendererImpl)-> u32 {
         r.max_texture_size
 }
 
+pub(crate) fn debug_info(r: &RendererImpl) -> crate::render::DebugInfo {
+        crate::render::DebugInfo {
+                backend: match r.adapter_backend.as_str() {
+                        "Vulkan" => "Vulkan".to_string(),
+                        "Gl" => "OpenGL ES".to_string(),
+                        other => other.to_string(),
+                },
+                device: r.adapter_name.clone(),
+                api_version: r.adapter_api.clone(),
+                driver: r.adapter_driver.clone(),
+                framebuffer: r.fb_size,
+                // El motor rellena estos dos; el renderer no conoce la ventana ni el modo de escalado.
+                window: (0, 0),
+                scaling: String::new(),
+                // Este backend dibuja a un lienzo a resolución del juego y lo escala a la ventana.
+                offscreen: true,
+                max_texture: r.max_texture_size,
+        }
+}
+
 pub(crate) fn set_draw_offset(r: &mut RendererImpl, x: f64, y: f64) {
         // Un NaN o infinito del juego acabaría en el shader como `NaN * 0`; se neutraliza aquí,
         // igual que hace el backend OpenGL.

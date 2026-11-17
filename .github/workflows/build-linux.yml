@@ -50,7 +50,7 @@ jobs:
 
       - name: Build engine
         run: |
-          cargo build --manifest-path engine/src/OpenGMK/Cargo.toml --release -p gm8emulator
+          cargo build --manifest-path engine/src/OpenGMK/Cargo.toml --release -p gm8emulator --features backend-wgpu
           install -m 0755 engine/src/OpenGMK/target/release/gm8emulator \
             desktopApp/src/main/resources/gm8emulator
 

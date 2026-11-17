@@ -53,7 +53,7 @@ jobs:
 
       - name: Build native engine
         working-directory: engine/src/OpenGMK
-        run: cargo +1.99.0 ndk -t arm64-v8a --platform "${ANDROID_PLATFORM}" build -p gm8emulator --release
+        run: cargo +1.99.0 ndk -t arm64-v8a --platform "${ANDROID_PLATFORM}" build -p gm8emulator --release --features backend-wgpu
 
       - name: Copy native library
         run: |

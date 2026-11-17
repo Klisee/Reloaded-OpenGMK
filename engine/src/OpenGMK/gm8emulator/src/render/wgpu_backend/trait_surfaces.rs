@@ -22,6 +22,26 @@ pub(crate) fn flush_queue(r: &mut RendererImpl) {
         r.prepare_batches();
 }
 
+thread_local! {
+    /// Quads of the debug overlay, in window pixels. `RendererImpl` cannot grow a field for them
+    /// from this module, and the renderer is single-threaded, so a thread_local is enough.
+    static UI_QUADS: RefCell<Vec<crate::render::UiQuad>> = const { RefCell::new(Vec::new()) };
+}
+
+pub(crate) fn set_ui_quads(r: &mut RendererImpl, quads: Vec<crate::render::UiQuad>) {
+        let _ = r;
+        UI_QUADS.with(|cell| *cell.borrow_mut() = quads);
+}
+
+/// Draws the debug overlay, if any, on top of the presented frame.
+fn draw_ui_quads(r: &mut RendererImpl, target: &wgpu::TextureView, window_width: u32, window_height: u32) {
+        let quads = UI_QUADS.with(|cell| std::mem::take(&mut *cell.borrow_mut()));
+        if quads.is_empty() {
+                return;
+        }
+        r.draw_ui(target, window_width, window_height, &quads);
+}
+
 pub(crate) fn present(r: &mut RendererImpl, window_width: u32, window_height: u32, scaling: Scaling) {
         // Una ventana de tamaño cero no tiene imagen que presentar (y pedir la textura fallaría).
         if window_width == 0 || window_height == 0 {
@@ -31,11 +51,29 @@ pub(crate) fn present(r: &mut RendererImpl, window_width: u32, window_height: u3
         // Termina el dibujo pendiente antes de tocar la surface.
         r.flush_now();
 
+        // Android may have replaced the window while the game was in the background. Checked here
+        // rather than on a callback so the surface is always rebuilt right before it is used.
+        #[cfg(target_os = "android")]
+        r.refresh_android_window();
+
         // OpenGL conserva el framebuffer entre frames, así que presentar sin haber dibujado deja
         // la imagen anterior. En wgpu cada textura del swapchain llega vacía: presentar un frame
         // sin contenido lo pintaría de negro. Con esto, los submenús que solo re-presentan (como
         // "Cargar partida") mantienen la imagen en vez de quedarse en negro.
-        if r.frame.prepared.is_empty() && r.frame.clears.is_empty() {
+        //
+        // Ojo: el frame vacío solo significa "no hay escena nueva". Los overlays (controles
+        // táctiles y HUD) siguen teniendo que dibujarse sobre el lienzo que se conserva; si se
+        // sale aquí, el menú de pausa se queda sin controles.
+        let empty_frame = r.frame.prepared.is_empty() && r.frame.clears.is_empty();
+        #[cfg(target_os = "android")]
+        let overlays_pending = !UI_QUADS.with(|cell| cell.borrow().is_empty())
+            || (crate::touch_controls::overlay_style() != crate::touch_controls::OverlayStyle::None
+                && !crate::touch_controls::controls().is_empty());
+        #[cfg(not(target_os = "android"))]
+        let overlays_pending = !UI_QUADS.with(|cell| cell.borrow().is_empty());
+        // Sin lienzo no hay nada que enseñar detrás de los overlays: la primera vez que se
+        // presenta tiene que venir con escena.
+        if empty_frame && (!overlays_pending || r.canvas.is_none()) {
             return;
         }
 
@@ -101,8 +139,28 @@ pub(crate) fn present(r: &mut RendererImpl, window_width: u32, window_height: u3
             },
         };
 
+        // Se dibuja al lienzo a resolución del juego y se vuelca a la ventana con nearest. Así la
+        // geometría sin textura (sombras, elipses, líneas) conserva el pixel-art, como el FBO de
+        // OpenGL. El lienzo se limpia al empezar el frame en `render_frame`.
+        //
+        // Con un frame vacío no se toca: el lienzo conserva lo último dibujado, que es justo lo
+        // que hace el framebuffer de OpenGL y lo que el menú de pausa espera ver detrás de sus
+        // controles.
+        r.ensure_canvas();
+        if !empty_frame {
+            if let Some(canvas) = r.canvas.as_ref().map(|c| c.view.clone()) {
+                r.render_frame(&canvas);
+            }
+            r.dump_canvas();
+        }
         let view = surface_texture.texture.create_view(&wgpu::TextureViewDescriptor::default());
-        r.render_frame(&view, viewport);
+        r.blit_canvas(&view, viewport);
+        // The on-screen touch controls and the debug overlay both go after the game has been
+        // scaled, in window pixels: the controls have to stay usable at any window size and the
+        // overlay's text has to stay readable.
+        #[cfg(target_os = "android")]
+        r.draw_touch_overlay(&view, window_width, window_height);
+        draw_ui_quads(r, &view, window_width, window_height);
         // Lo dibujado ya está enviado a la cola; soltar los buffers y las limpiezas deja que la GPU
         // los recicle para el frame siguiente.
         r.frame.prepared.clear();
@@ -186,16 +244,19 @@ struct StoredFrame {
     zbuf: Vec<f32>,
 }
 
-pub(crate) fn present_surface(r: &mut RendererImpl, surface: AtlasRef, window_width: u32, window_height: u32) {
+pub(crate) fn present_surface(r: &mut RendererImpl, surface: AtlasRef, _window_width: u32, _window_height: u32) {
     // Se dibuja el atlas a pantalla completa encima de lo que haya en el frame. El resto de
     // primitivas del frame ya están en la cola, así que esto conserva el orden de dibujado.
+    //
+    // Las coordenadas van en píxeles del framebuffer del juego, no de la ventana: el frame se
+    // dibuja al lienzo a resolución del juego y `present` lo escala después.
     let atlas_id = r.resolve_atlas_id(Some(surface));
     let rect = r.textures.rect(surface).copied();
     let (x, y, w, h) = match rect {
         Some(rect) => (rect.x as f32, rect.y as f32, rect.w as f32, rect.h as f32),
         None => (0.0, 0.0, 1.0, 1.0),
     };
-    let win = (window_width as f32, window_height as f32);
+    let win = (r.fb_size.0.max(1) as f32, r.fb_size.1.max(1) as f32);
     let corners = [
         (0.0f32, 0.0f32, x, y),
         (win.0, 0.0, x + w, y),

@@ -232,6 +232,12 @@ impl TextureStore {
         self.textures.get(&id).map(|atlas| &atlas.bind_group)
     }
 
+    /// Tamaño en píxeles de una textura. El overlay lo necesita para pasar los UVs de un sprite a
+    /// coordenadas normalizadas.
+    pub fn size(&self, id: u32) -> Option<(u32, u32)> {
+        self.textures.get(&id).map(|atlas| (atlas.width, atlas.height))
+    }
+
     /// Copia en CPU de los píxeles de una textura, con las filas apretadas. Es la que se subió, no
     /// el contenido actual de la GPU: una superficie usada como destino de render puede diferir.
     pub fn pixels(&self, id: u32) -> Option<&[u8]> {

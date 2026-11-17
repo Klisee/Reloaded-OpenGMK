@@ -198,6 +198,154 @@ impl RenderState {
     }
 }
 
+/// Program that draws the debug overlay in window pixels, on top of the presented frame.
+///
+/// It is separate from the sprite pipeline on purpose: the game draws into its own framebuffer at
+/// game resolution and is scaled at the very end, while the overlay has to stay at window
+/// resolution so its text is readable. Nothing here touches the emulator's render state.
+struct UiProgram {
+    program: GLuint,
+    vao: GLuint,
+    vbo: GLuint,
+    /// 1x1 white texture, so a flat rectangle shares the shader with the sprites.
+    white: GLuint,
+    loc_tex: GLint,
+}
+
+impl UiProgram {
+    fn new(gl: &gl::Gl) -> Self {
+        unsafe {
+            // `shader_source` prepends the right `#version` (330 core on desktop, 300 es on Android)
+            // and the precision qualifier, so the same source builds on both.
+            let vs_src = shader_source(
+                "layout(location=0) in vec2 a_pos;\nlayout(location=1) in vec4 a_col;\nlayout(location=2) in vec2 a_uv;\nout vec4 v_col;\nout vec2 v_uv;\nvoid main(){ gl_Position = vec4(a_pos, 0.0, 1.0); v_col = a_col; v_uv = a_uv; }",
+            );
+            let fs_src = shader_source("in vec4 v_col;\nin vec2 v_uv;\nuniform sampler2D u_tex;\nout vec4 o_col;\nvoid main(){ o_col = v_col * texture(u_tex, v_uv); }");
+            let compile = |kind, src: &[u8]| {
+                let shader = gl.CreateShader(kind);
+                gl.ShaderSource(shader, 1, &(src.as_ptr() as *const GLchar), std::ptr::null());
+                gl.CompileShader(shader);
+                let mut ok = 0;
+                gl.GetShaderiv(shader, gl::COMPILE_STATUS, &mut ok);
+                if ok == 0 {
+                    eprintln!("[ui] fallo al compilar un shader del overlay");
+                }
+                shader
+            };
+            let vs = compile(gl::VERTEX_SHADER, &vs_src);
+            let fs = compile(gl::FRAGMENT_SHADER, &fs_src);
+            let program = gl.CreateProgram();
+            gl.AttachShader(program, vs);
+            gl.AttachShader(program, fs);
+            gl.LinkProgram(program);
+            let mut ok = 0;
+            gl.GetProgramiv(program, gl::LINK_STATUS, &mut ok);
+            if ok == 0 {
+                eprintln!("[ui] fallo al enlazar el programa del overlay");
+            }
+            gl.DeleteShader(vs);
+            gl.DeleteShader(fs);
+            let loc_tex = gl.GetUniformLocation(program, b"u_tex\0".as_ptr().cast());
+
+            let mut white = 0;
+            gl.GenTextures(1, &mut white);
+            gl.BindTexture(gl::TEXTURE_2D, white);
+            gl.TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as _);
+            gl.TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as _);
+            gl.TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as _);
+            gl.TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as _);
+            let pixel: [u8; 4] = [255, 255, 255, 255];
+            gl.TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as _, 1, 1, 0, gl::RGBA, gl::UNSIGNED_BYTE, pixel.as_ptr().cast());
+
+            let mut vao = 0;
+            gl.GenVertexArrays(1, &mut vao);
+            let mut vbo = 0;
+            gl.GenBuffers(1, &mut vbo);
+            gl.BindVertexArray(vao);
+            gl.BindBuffer(gl::ARRAY_BUFFER, vbo);
+            let stride = (8 * std::mem::size_of::<f32>()) as GLsizei;
+            gl.VertexAttribPointer(0, 2, gl::FLOAT, gl::FALSE, stride, std::ptr::null());
+            gl.EnableVertexAttribArray(0);
+            gl.VertexAttribPointer(1, 4, gl::FLOAT, gl::FALSE, stride, 8 as *const _);
+            gl.EnableVertexAttribArray(1);
+            gl.VertexAttribPointer(2, 2, gl::FLOAT, gl::FALSE, stride, 24 as *const _);
+            gl.EnableVertexAttribArray(2);
+            gl.BindVertexArray(0);
+
+            Self { program, vao, vbo, white, loc_tex }
+        }
+    }
+
+    /// Draws the quads in window pixels (origin at the top-left corner).
+    fn draw(&self, gl: &gl::Gl, quads: &[(crate::render::UiQuad, Option<GLuint>)], window_width: u32, window_height: u32) {
+        if quads.is_empty() || window_width == 0 || window_height == 0 {
+            return
+        }
+        unsafe {
+            gl.UseProgram(self.program);
+            gl.BindVertexArray(self.vao);
+            gl.BindBuffer(gl::ARRAY_BUFFER, self.vbo);
+            gl.Disable(gl::DEPTH_TEST);
+            gl.Disable(gl::CULL_FACE);
+            gl.Enable(gl::BLEND);
+            gl.BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
+            gl.ActiveTexture(gl::TEXTURE0);
+            gl.Uniform1i(self.loc_tex, 0);
+
+            let (ww, wh) = (window_width as f32, window_height as f32);
+            let mut vertices: Vec<f32> = Vec::with_capacity(quads.len() * 6 * 8);
+            let mut bound: Option<GLuint> = None;
+            for (quad, texture) in quads {
+                let texture = texture.unwrap_or(self.white);
+                if bound != Some(texture) {
+                    Self::flush(gl, &mut vertices, bound.unwrap_or(self.white));
+                    bound = Some(texture);
+                }
+                let (x, y, w, h) = quad.rect;
+                let (u0, v0, u1, v1) = quad.uv;
+                let mut corner = |cx: f32, cy: f32, u: f32, v: f32| {
+                    vertices.extend_from_slice(&[
+                        cx / ww * 2.0 - 1.0,
+                        1.0 - cy / wh * 2.0,
+                        quad.colour[0],
+                        quad.colour[1],
+                        quad.colour[2],
+                        quad.colour[3],
+                        u,
+                        v,
+                    ]);
+                };
+                corner(x, y, u0, v0);
+                corner(x + w, y, u1, v0);
+                corner(x + w, y + h, u1, v1);
+                corner(x, y, u0, v0);
+                corner(x + w, y + h, u1, v1);
+                corner(x, y + h, u0, v1);
+            }
+            Self::flush(gl, &mut vertices, bound.unwrap_or(self.white));
+            gl.BindVertexArray(0);
+        }
+    }
+
+    /// Uploads and draws the vertices queued so far with the given texture.
+    fn flush(gl: &gl::Gl, vertices: &mut Vec<f32>, texture: GLuint) {
+        if vertices.is_empty() {
+            return
+        }
+        unsafe {
+            gl.BindTexture(gl::TEXTURE_2D, texture);
+            gl.BufferData(
+                gl::ARRAY_BUFFER,
+                (vertices.len() * std::mem::size_of::<f32>()) as _,
+                vertices.as_ptr().cast(),
+                gl::STREAM_DRAW,
+            );
+            gl.DrawArrays(gl::TRIANGLES, 0, (vertices.len() / 8) as i32);
+        }
+        vertices.clear();
+    }
+}
+
 pub struct RendererImpl {
     imp: native_gl::PlatformImpl,
     gl: gl::Gl,
@@ -254,6 +402,11 @@ pub struct RendererImpl {
     /// Lazily-built program/buffers for the on-screen touch controls (Android only).
     #[cfg(target_os = "android")]
     overlay: Option<Overlay>,
+
+    /// Program that draws the debug overlay in window pixels, on top of the scaled frame.
+    ui: Option<UiProgram>,
+    /// Quads of the debug overlay for the frame being presented.
+    ui_quads: Vec<crate::render::UiQuad>,
 }
 
 /// One image in the packed control artwork: which control it belongs to, and where it sits in the
@@ -938,6 +1091,9 @@ impl RendererImpl {
                 #[cfg(target_os = "android")]
                 overlay: None,
 
+                ui: None,
+                ui_quads: Vec::new(),
+
                 gl,
             };
             assert_eq!(renderer.gl.GetError(), 0);
@@ -1224,7 +1380,7 @@ static LABEL_TEX: std::sync::Mutex<GLuint> = std::sync::Mutex::new(0);
 static LABELS: std::sync::Mutex<Vec<(String, [f32; 4], f32)>> = std::sync::Mutex::new(Vec::new());
 
 #[cfg(target_os = "android")]
-fn label_file(text: &str) -> String {
+pub(crate) fn label_file(text: &str) -> String {
     let mut name = String::from("label_");
     for c in text.chars() {
         name.push(if c.is_ascii_alphanumeric() { c } else { '_' });
@@ -1409,14 +1565,12 @@ unsafe fn upload_party(gl: &gl::Gl, texture: GLuint, species: [i32; crate::touch
 
 /// Pushes one vertex, converting window pixels to clip space. The texture coordinate is left at the
 /// top-left of the overlay's 1x1 white texture, so a plain colour comes through untouched.
-#[cfg(target_os = "android")]
-fn push_vertex(out: &mut Vec<f32>, ww: f32, wh: f32, x: f32, y: f32, col: [f32; 4]) {
+pub(crate) fn push_vertex(out: &mut Vec<f32>, ww: f32, wh: f32, x: f32, y: f32, col: [f32; 4]) {
     out.extend_from_slice(&[x / ww * 2.0 - 1.0, 1.0 - y / wh * 2.0, col[0], col[1], col[2], col[3], 0.0, 0.0]);
 }
 
 /// Transforms only the drawing; touch areas and key dispatch remain independent.
-#[cfg(target_os = "android")]
-fn transform_touch_vertices(vertices: &mut [f32], center: (f32, f32), scale: f32, brightness: f32) {
+pub(crate) fn transform_touch_vertices(vertices: &mut [f32], center: (f32, f32), scale: f32, brightness: f32) {
     let (cx, cy) = (center.0*2.0-1.0, 1.0-center.1*2.0);
     for vertex in vertices.chunks_exact_mut(8) {
         vertex[0] = cx + (vertex[0]-cx)*scale;
@@ -1452,21 +1606,18 @@ fn push_sprite(
     corner(x1, y2, u1, v2);
 }
 
-#[cfg(target_os = "android")]
-fn push_tri(out: &mut Vec<f32>, ww: f32, wh: f32, a: (f32, f32), b: (f32, f32), c: (f32, f32), col: [f32; 4]) {
+pub(crate) fn push_tri(out: &mut Vec<f32>, ww: f32, wh: f32, a: (f32, f32), b: (f32, f32), c: (f32, f32), col: [f32; 4]) {
     push_vertex(out, ww, wh, a.0, a.1, col);
     push_vertex(out, ww, wh, b.0, b.1, col);
     push_vertex(out, ww, wh, c.0, c.1, col);
 }
 
-#[cfg(target_os = "android")]
-fn push_quad(out: &mut Vec<f32>, ww: f32, wh: f32, x1: f32, y1: f32, x2: f32, y2: f32, col: [f32; 4]) {
+pub(crate) fn push_quad(out: &mut Vec<f32>, ww: f32, wh: f32, x1: f32, y1: f32, x2: f32, y2: f32, col: [f32; 4]) {
     push_tri(out, ww, wh, (x1, y1), (x2, y1), (x2, y2), col);
     push_tri(out, ww, wh, (x1, y1), (x2, y2), (x1, y2), col);
 }
 
-#[cfg(target_os = "android")]
-fn push_circle(out: &mut Vec<f32>, ww: f32, wh: f32, cx: f32, cy: f32, r: f32, col: [f32; 4]) {
+pub(crate) fn push_circle(out: &mut Vec<f32>, ww: f32, wh: f32, cx: f32, cy: f32, r: f32, col: [f32; 4]) {
     const SEG: usize = 24;
     for i in 0..SEG {
         let a0 = (i as f32) / (SEG as f32) * std::f32::consts::TAU;
@@ -1475,8 +1626,7 @@ fn push_circle(out: &mut Vec<f32>, ww: f32, wh: f32, cx: f32, cy: f32, r: f32, c
     }
 }
 
-#[cfg(target_os = "android")]
-fn push_ring(out: &mut Vec<f32>, ww: f32, wh: f32, cx: f32, cy: f32, r: f32, thickness: f32, col: [f32; 4]) {
+pub(crate) fn push_ring(out: &mut Vec<f32>, ww: f32, wh: f32, cx: f32, cy: f32, r: f32, thickness: f32, col: [f32; 4]) {
     const SEG: usize = 24;
     let r0 = (r - thickness).max(0.0);
     for i in 0..SEG {
@@ -1489,8 +1639,7 @@ fn push_ring(out: &mut Vec<f32>, ww: f32, wh: f32, cx: f32, cy: f32, r: f32, thi
     }
 }
 
-#[cfg(target_os = "android")]
-fn push_arrow(out: &mut Vec<f32>, ww: f32, wh: f32, cx: f32, cy: f32, size: f32, dir: crate::touch_controls::Dir, col: [f32; 4]) {
+pub(crate) fn push_arrow(out: &mut Vec<f32>, ww: f32, wh: f32, cx: f32, cy: f32, size: f32, dir: crate::touch_controls::Dir, col: [f32; 4]) {
     use crate::touch_controls::Dir;
     let (dx, dy) = match dir {
         Dir::Up => (0.0, -1.0),
@@ -1506,8 +1655,7 @@ fn push_arrow(out: &mut Vec<f32>, ww: f32, wh: f32, cx: f32, cy: f32, size: f32,
 }
 
 /// A tiny 3x5 bitmap font, just for the control labels.
-#[cfg(target_os = "android")]
-fn glyph(c: char) -> Option<[u8; 5]> {
+pub(crate) fn glyph(c: char) -> Option<[u8; 5]> {
     Some(match c {
         'Z' => [0b111, 0b001, 0b010, 0b100, 0b111],
         'X' => [0b101, 0b101, 0b010, 0b101, 0b101],
@@ -1541,8 +1689,7 @@ fn glyph(c: char) -> Option<[u8; 5]> {
     })
 }
 
-#[cfg(target_os = "android")]
-fn push_text(out: &mut Vec<f32>, ww: f32, wh: f32, text: &str, cx: f32, cy: f32, px: f32, col: [f32; 4]) {
+pub(crate) fn push_text(out: &mut Vec<f32>, ww: f32, wh: f32, text: &str, cx: f32, cy: f32, px: f32, col: [f32; 4]) {
     let chars: Vec<char> = text.chars().collect();
     let char_w = 4.0 * px; // 3 columns of glyph + 1 gap
     let total = char_w * chars.len() as f32 - px;
@@ -1566,8 +1713,7 @@ fn push_text(out: &mut Vec<f32>, ww: f32, wh: f32, text: &str, cx: f32, cy: f32,
 // --- New overlay style: smooth, semi-transparent shapes. All geometry, so it stays crisp at any size
 // and needs no artwork.
 
-#[cfg(target_os = "android")]
-fn lerp_col(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
+pub(crate) fn lerp_col(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
     let t = t.clamp(0.0, 1.0);
     [
         a[0] + (b[0] - a[0]) * t,
@@ -1577,15 +1723,13 @@ fn lerp_col(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
     ]
 }
 
-#[cfg(target_os = "android")]
-fn with_alpha(mut col: [f32; 4], alpha: f32) -> [f32; 4] {
+pub(crate) fn with_alpha(mut col: [f32; 4], alpha: f32) -> [f32; 4] {
     col[3] *= alpha;
     col
 }
 
 /// The outline of a rounded rectangle, walked clockwise so it can be drawn as a fan from the centre.
-#[cfg(target_os = "android")]
-fn round_rect_outline(cx: f32, cy: f32, hw: f32, hh: f32, r: f32) -> Vec<(f32, f32)> {
+pub(crate) fn round_rect_outline(cx: f32, cy: f32, hw: f32, hh: f32, r: f32) -> Vec<(f32, f32)> {
     const SEG: usize = 5;
     let r = r.min(hw).min(hh).max(0.0);
     let corners = [
@@ -1605,8 +1749,7 @@ fn round_rect_outline(cx: f32, cy: f32, hw: f32, hh: f32, r: f32) -> Vec<(f32, f
 }
 
 /// A filled rounded rectangle with a vertical gradient (top colour down to bottom colour).
-#[cfg(target_os = "android")]
-fn push_round_rect(
+pub(crate) fn push_round_rect(
     out: &mut Vec<f32>,
     ww: f32,
     wh: f32,
@@ -1753,8 +1896,7 @@ fn push_soft_dpad(out: &mut Vec<f32>, ww: f32, wh: f32, cx: f32, cy: f32, r: f32
 
 /// A modern control: a dark translucent disc with a soft rim, an inner ring and its label. Wide
 /// labels become a rounded pill instead of being squeezed into a circle.
-#[cfg(target_os = "android")]
-fn push_modern_control(
+pub(crate) fn push_modern_control(
     out: &mut Vec<f32>,
     ww: f32,
     wh: f32,
@@ -1797,16 +1939,14 @@ fn push_modern_control(
     (cx, cy, r)
 }
 
-#[cfg(target_os = "android")]
-fn poly_dir(from: (f32, f32), to: (f32, f32)) -> (f32, f32) {
+pub(crate) fn poly_dir(from: (f32, f32), to: (f32, f32)) -> (f32, f32) {
     let (dx, dy) = (to.0 - from.0, to.1 - from.1);
     let len = (dx * dx + dy * dy).sqrt().max(0.0001);
     (dx / len, dy / len)
 }
 
 /// The outline of a rounded cross, walked in order, so the D-pad reads as one clean shape.
-#[cfg(target_os = "android")]
-fn plus_points(cx: f32, cy: f32, arm: f32, thick: f32, radius: f32) -> Vec<(f32, f32)> {
+pub(crate) fn plus_points(cx: f32, cy: f32, arm: f32, thick: f32, radius: f32) -> Vec<(f32, f32)> {
     let corners = [
         (cx - thick, cy - arm), (cx + thick, cy - arm), (cx + thick, cy - thick), (cx + arm, cy - thick),
         (cx + arm, cy + thick), (cx + thick, cy + thick), (cx + thick, cy + arm), (cx - thick, cy + arm),
@@ -1832,8 +1972,7 @@ fn plus_points(cx: f32, cy: f32, arm: f32, thick: f32, radius: f32) -> Vec<(f32,
 }
 
 /// Fills a polygon as a fan from (cx, cy), with a vertical gradient.
-#[cfg(target_os = "android")]
-fn push_polygon(out: &mut Vec<f32>, ww: f32, wh: f32, points: &[(f32, f32)], cx: f32, cy: f32, top: [f32; 4], bottom: [f32; 4]) {
+pub(crate) fn push_polygon(out: &mut Vec<f32>, ww: f32, wh: f32, points: &[(f32, f32)], cx: f32, cy: f32, top: [f32; 4], bottom: [f32; 4]) {
     if points.len() < 3 {
         return
     }
@@ -1854,8 +1993,7 @@ fn push_polygon(out: &mut Vec<f32>, ww: f32, wh: f32, points: &[(f32, f32)], cx:
 
 /// The modern movement control: a clean translucent disc with a single rounded cross that lights up
 /// the arm being pressed, or a knob that follows the thumb (joystick).
-#[cfg(target_os = "android")]
-fn push_modern_movement(out: &mut Vec<f32>, ww: f32, wh: f32, cx: f32, cy: f32, r: f32, ox: f32, oy: f32, dpad: bool, tint: Option<[f32; 3]>) {
+pub(crate) fn push_modern_movement(out: &mut Vec<f32>, ww: f32, wh: f32, cx: f32, cy: f32, r: f32, ox: f32, oy: f32, dpad: bool, tint: Option<[f32; 3]>) {
     use crate::touch_controls::Dir;
     let t = tint.unwrap_or([1.0, 1.0, 1.0]);
     let shade = |g: f32, a: f32| [t[0] * g, t[1] * g, t[2] * g, a];
@@ -2277,6 +2415,37 @@ impl RendererImpl {
 impl RendererTrait for RendererImpl {
     fn as_any(&self) -> &dyn Any {
         self
+    }
+
+    fn debug_info(&self) -> crate::render::DebugInfo {
+        use std::ffi::CStr;
+        let string = |name| unsafe {
+            let ptr = self.gl.GetString(name);
+            if ptr.is_null() { String::new() } else { CStr::from_ptr(ptr.cast()).to_string_lossy().into_owned() }
+        };
+        let renderer = string(gl::RENDERER);
+        let vendor = string(gl::VENDOR);
+        let version = string(gl::VERSION);
+        crate::render::DebugInfo {
+            backend: if cfg!(target_os = "android") { "OpenGL ES".into() } else { "OpenGL".into() },
+            device: if renderer.is_empty() { vendor.clone() } else { renderer },
+            api_version: version,
+            driver: vendor,
+            framebuffer: (self.framebuffer.width as u32, self.framebuffer.height as u32),
+            window: (0, 0),
+            scaling: String::new(),
+            offscreen: true,
+            max_texture: self.max_texture_size(),
+        }
+    }
+
+    fn set_ui_quads(&mut self, quads: Vec<crate::render::UiQuad>) {
+        self.ui_quads = quads;
+    }
+
+    fn atlas_size(&self, atlas_id: u32) -> Option<(u32, u32)> {
+        let (w, h) = self.atlas_packers.get(atlas_id as usize)?.size();
+        Some((w.max(0) as u32, h.max(0) as u32))
     }
 
     fn max_texture_size(&self) -> u32 {
@@ -4146,6 +4315,71 @@ impl RendererTrait for RendererImpl {
             // On-screen touch controls (Android): drawn on top of the presented frame.
             #[cfg(target_os = "android")]
             self.draw_touch_overlay(window_width_u, window_height_u);
+
+            // The debug overlay goes after the game has been scaled to the window, in window
+            // pixels: that keeps small text readable instead of magnifying it with the game.
+            //
+            // It has to leave the GL state exactly as it found it. The game only re-applies the
+            // state it thinks changed (`update_render_state` diffs against its own cache), so
+            // leaving a different framebuffer bound, or depth test / blend / scissor changed, is
+            // not fixed up on the next frame: the game would keep drawing to the window while
+            // `present` blits its (now stale) framebuffer, and the picture looks frozen.
+            if !self.ui_quads.is_empty() {
+                if self.ui.is_none() {
+                    self.ui = Some(UiProgram::new(&self.gl));
+                }
+                let resolved: Vec<(crate::render::UiQuad, Option<GLuint>)> = self
+                    .ui_quads
+                    .iter()
+                    .map(|quad| {
+                        let texture = quad.atlas.and_then(|atlas_ref| {
+                            self.get_rect(atlas_ref)
+                                .and_then(|rect| self.texture_ids.get(rect.atlas_id as usize).copied().flatten())
+                        });
+                        (*quad, texture)
+                    })
+                    .collect();
+
+                let mut previous_fbo = 0;
+                let mut previous_viewport = [0i32; 4];
+                self.gl.GetIntegerv(gl::DRAW_FRAMEBUFFER_BINDING, &mut previous_fbo);
+                self.gl.GetIntegerv(gl::VIEWPORT, previous_viewport.as_mut_ptr());
+                let scissor_was_on = self.gl.IsEnabled(gl::SCISSOR_TEST) != 0;
+                let depth_was_on = self.gl.IsEnabled(gl::DEPTH_TEST) != 0;
+                let cull_was_on = self.gl.IsEnabled(gl::CULL_FACE) != 0;
+                let blend_was_on = self.gl.IsEnabled(gl::BLEND) != 0;
+
+                self.gl.BindFramebuffer(gl::FRAMEBUFFER, 0);
+                self.gl.Disable(gl::SCISSOR_TEST);
+                self.gl.Viewport(0, 0, window_width_u as i32, window_height_u as i32);
+                let ui = self.ui.as_ref().expect("creado arriba");
+                ui.draw(&self.gl, &resolved, window_width_u, window_height_u);
+
+                self.gl.BindFramebuffer(gl::FRAMEBUFFER, previous_fbo as GLuint);
+                self.gl.Viewport(
+                    previous_viewport[0],
+                    previous_viewport[1],
+                    previous_viewport[2],
+                    previous_viewport[3],
+                );
+                self.gl.Scissor(
+                    previous_viewport[0],
+                    previous_viewport[1],
+                    previous_viewport[2],
+                    previous_viewport[3],
+                );
+                if scissor_was_on { self.gl.Enable(gl::SCISSOR_TEST) } else { self.gl.Disable(gl::SCISSOR_TEST) }
+                if depth_was_on { self.gl.Enable(gl::DEPTH_TEST) } else { self.gl.Disable(gl::DEPTH_TEST) }
+                if cull_was_on { self.gl.Enable(gl::CULL_FACE) } else { self.gl.Disable(gl::CULL_FACE) }
+                if blend_was_on { self.gl.Enable(gl::BLEND) } else { self.gl.Disable(gl::BLEND) }
+                let (src, dst) = self.queue_render_state.blend_mode;
+                self.gl.BlendFunc(src.into(), dst.into());
+                self.gl.UseProgram(self.program);
+                self.gl.BindVertexArray(self.vao);
+                self.current_texture = None;
+                self.last_filter_mode = None;
+            }
+            self.ui_quads.clear();
 
             // Present buffer
             // Note: Game Maker always presents the backbuffer, even when the target is a surface.

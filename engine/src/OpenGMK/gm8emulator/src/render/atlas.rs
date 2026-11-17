@@ -30,6 +30,23 @@ pub struct AtlasRect {
     pub(super) origin_y: f32,
 }
 
+impl AtlasRect {
+    /// Texture that holds this rectangle.
+    pub fn atlas_id(&self) -> u32 {
+        self.atlas_id
+    }
+
+    /// Position and size of the cell inside its atlas, in pixels.
+    pub fn cell(&self) -> (i32, i32, i32, i32) {
+        (self.x, self.y, self.w, self.h)
+    }
+
+    /// Size of the cell in pixels.
+    pub fn size(&self) -> (i32, i32) {
+        (self.w, self.h)
+    }
+}
+
 impl AtlasBuilder {
     pub fn new(max_size: i32) -> Self {
         assert_eq!(max_size, next_pow2(max_size));

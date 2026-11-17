@@ -134,13 +134,19 @@ fun runWindowsApplication(root: File) {
                             "uncapped" -> detectedHz.toString()
                             else -> "native"
                         }
-                        writeLog("Video: render=$renderMode showFps=${settings.showFps}\n")
+                        val backend = when (settings.renderer) {
+                            "vulkan" -> "wgpu"
+                            "opengl" -> "gl"
+                            else -> null
+                        }
+                        writeLog("Video: render=$renderMode showFps=${settings.showFps} backend=${backend ?: "auto"}\n")
                         runCatching {
                             val builder = ProcessBuilder(engine.absolutePath, exe.absolutePath)
                                 .directory(jvmRepo.gameDir)
                                 .redirectErrorStream(true)
                                 .redirectOutput(ProcessBuilder.Redirect.appendTo(log))
                             builder.environment()["OPENGMK_RENDER"] = renderMode
+                            if (backend != null) builder.environment()["OPENGMK_RENDERER"] = backend
                             builder.environment()["OPENGMK_SHOW_FPS"] = if (settings.showFps) "1" else "0"
                             builder.environment()["OPENGMK_SCALING"] = if (settings.keepAspect) "aspect" else "full"
                             builder.environment()["OPENGMK_RENDER_HZ"] = detectedHz.toString()

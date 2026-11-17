@@ -2865,6 +2865,8 @@ private fun MaterialSettingsScreen(
     var darkTheme by remember(theme) { mutableStateOf(theme != "light") }
     var confirmingDelete by remember { mutableStateOf(false) }
     var keepAspect by remember { mutableStateOf(settings.keepAspect) }
+    var renderer by remember { mutableStateOf(settings.renderer) }
+    var showRenderer by remember { mutableStateOf(false) }
     var keepScreenOn by remember { mutableStateOf(settings.keepScreenOn) }
     var updateFound by remember { mutableStateOf<UpdateRelease?>(null) }
     var checkingUpdate by remember { mutableStateOf(false) }
@@ -3103,6 +3105,18 @@ private fun MaterialSettingsScreen(
                                         },
                                     )
                                 }
+                                PcSettingsCard("Gráficos") {
+                                    PcSettingRow(
+                                        Icons.Filled.Memory,
+                                        "Renderizador",
+                                        when (renderer) {
+                                            "vulkan" -> "Vulkan (wgpu), experimental"
+                                            "opengl" -> "OpenGL, forzado"
+                                            else -> "Automático (OpenGL)"
+                                        },
+                                        onClick = { showRenderer = true },
+                                    )
+                                }
                                 PcSettingsCard("Pantalla") {
                                     PcSettingRow(
                                         Icons.Filled.LightMode,
@@ -3190,6 +3204,41 @@ private fun MaterialSettingsScreen(
                 }
             }
             SnackbarHost(snackbar, modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp))
+        }
+        if (showRenderer) {
+            AlertDialog(
+                onDismissRequest = { showRenderer = false },
+                title = { Text("Renderizador") },
+                text = {
+                    Column {
+                        ChoiceRow(
+                            icon = Icons.Filled.Memory,
+                            title = "Automático",
+                            subtitle = "OpenGL, el backend probado. Es lo que se usa por defecto.",
+                            selected = renderer == "auto",
+                            items = 3,
+                            index = 0,
+                        ) { renderer = "auto"; settings.renderer = "auto"; showRenderer = false }
+                        ChoiceRow(
+                            icon = Icons.Filled.Memory,
+                            title = "OpenGL",
+                            subtitle = "Fuerza el backend clásico en todas las plataformas.",
+                            selected = renderer == "opengl",
+                            items = 3,
+                            index = 1,
+                        ) { renderer = "opengl"; settings.renderer = "opengl"; showRenderer = false }
+                        ChoiceRow(
+                            icon = Icons.Filled.Memory,
+                            title = "Vulkan",
+                            subtitle = "Backend nuevo sobre wgpu. Experimental; puede ir más fino en equipos modernos.",
+                            selected = renderer == "vulkan",
+                            items = 3,
+                            index = 2,
+                        ) { renderer = "vulkan"; settings.renderer = "vulkan"; showRenderer = false }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { showRenderer = false }) { Text("Cerrar") } },
+            )
         }
         return
     }
@@ -3367,6 +3416,21 @@ private fun MaterialSettingsScreen(
                 )
             }
 
+            MaterialSettingsSection("Gráficos") {
+                MaterialSettingRow(
+                    icon = Icons.Filled.Memory,
+                    title = "Renderizador",
+                    subtitle = when (renderer) {
+                        "vulkan" -> "Vulkan (wgpu), experimental"
+                        "opengl" -> "OpenGL, forzado"
+                        else -> "Automático (OpenGL)"
+                    },
+                    iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                    iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
+                    onClick = { showRenderer = true },
+                )
+            }
+
             MaterialSettingsSection("Controles") {
                 MaterialSettingRow(
                     icon = Icons.Filled.Tune,
@@ -3431,6 +3495,41 @@ private fun MaterialSettingsScreen(
             }
 
             Spacer(Modifier.height(8.dp))
+        }
+        if (showRenderer) {
+            AlertDialog(
+                onDismissRequest = { showRenderer = false },
+                title = { Text("Renderizador") },
+                text = {
+                    Column {
+                        ChoiceRow(
+                            icon = Icons.Filled.Memory,
+                            title = "Automático",
+                            subtitle = "OpenGL, el backend probado. Es lo que se usa por defecto.",
+                            selected = renderer == "auto",
+                            items = 3,
+                            index = 0,
+                        ) { renderer = "auto"; settings.renderer = "auto"; showRenderer = false }
+                        ChoiceRow(
+                            icon = Icons.Filled.Memory,
+                            title = "OpenGL",
+                            subtitle = "Fuerza el backend clásico en todas las plataformas.",
+                            selected = renderer == "opengl",
+                            items = 3,
+                            index = 1,
+                        ) { renderer = "opengl"; settings.renderer = "opengl"; showRenderer = false }
+                        ChoiceRow(
+                            icon = Icons.Filled.Memory,
+                            title = "Vulkan",
+                            subtitle = "Backend nuevo sobre wgpu. Experimental; puede ir más fino en móviles modernos.",
+                            selected = renderer == "vulkan",
+                            items = 3,
+                            index = 2,
+                        ) { renderer = "vulkan"; settings.renderer = "vulkan"; showRenderer = false }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { showRenderer = false }) { Text("Cerrar") } },
+            )
         }
     }
 }

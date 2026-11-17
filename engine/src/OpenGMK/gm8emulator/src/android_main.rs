@@ -210,6 +210,22 @@ fn load_video() {
                     eprintln!("[video] mostrar FPS: {}", value != "0");
                     std::env::set_var("OPENGMK_SHOW_FPS", if value == "1" { "1" } else { "0" });
                 },
+                // Render backend picked in the launcher. `auto` leaves the engine's own choice
+                // (OpenGL) untouched; `vulkan` asks for the wgpu backend.
+                "renderer" => {
+                    let value = value.trim();
+                    match value {
+                        "vulkan" => {
+                            eprintln!("[video] renderizador: wgpu (Vulkan)");
+                            std::env::set_var("OPENGMK_RENDERER", "wgpu");
+                        },
+                        "opengl" => {
+                            eprintln!("[video] renderizador: OpenGL");
+                            std::env::set_var("OPENGMK_RENDERER", "gl");
+                        },
+                        _ => (),
+                    }
+                },
                 _ => (),
             }
         }

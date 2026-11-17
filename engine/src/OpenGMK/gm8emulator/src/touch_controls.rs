@@ -192,6 +192,8 @@ pub const CLASSIC_CONTROLS: &[Control] = &[
     Control { name: "ctrl", key: Key::LeftControl, shape: Shape::Circle { cx: 0.500, cy: 0.500, r: 0.028 }, label: Label::Text("Ctrl"), contexts: 0 },
     Control { name: "d", key: Key::D, shape: Shape::Circle { cx: 0.500, cy: 0.500, r: 0.028 }, label: Label::Text("D"), contexts: 0 },
     Control { name: "f3", key: Key::F3, shape: Shape::Circle { cx: 0.500, cy: 0.500, r: 0.028 }, label: Label::Text("F3"), contexts: 0 },
+    // The debug overlay (the engine's F3, on desktop) is toggled with Tab.
+    Control { name: "tab", key: Key::Tab, shape: Shape::Circle { cx: 0.500, cy: 0.500, r: 0.028 }, label: Label::Text("Tab"), contexts: 0 },
     Control { name: "h", key: Key::H, shape: Shape::Circle { cx: 0.500, cy: 0.500, r: 0.028 }, label: Label::Text("H"), contexts: 0 },
     Control { name: "k", key: Key::K, shape: Shape::Circle { cx: 0.500, cy: 0.500, r: 0.028 }, label: Label::Text("K"), contexts: 0 },
 ];
@@ -263,6 +265,8 @@ pub const NEW_CONTROLS: &[Control] = &[
     Control { name: "ctrl", key: Key::LeftControl, shape: Shape::Circle { cx: 0.500, cy: 0.500, r: 0.028 }, label: Label::Text("Ctrl"), contexts: 0 },
     Control { name: "d", key: Key::D, shape: Shape::Circle { cx: 0.500, cy: 0.500, r: 0.028 }, label: Label::Text("D"), contexts: 0 },
     Control { name: "f3", key: Key::F3, shape: Shape::Circle { cx: 0.500, cy: 0.500, r: 0.028 }, label: Label::Text("F3"), contexts: 0 },
+    // The debug overlay (the engine's F3, on desktop) is toggled with Tab.
+    Control { name: "tab", key: Key::Tab, shape: Shape::Circle { cx: 0.500, cy: 0.500, r: 0.028 }, label: Label::Text("Tab"), contexts: 0 },
     Control { name: "h", key: Key::H, shape: Shape::Circle { cx: 0.500, cy: 0.500, r: 0.028 }, label: Label::Text("H"), contexts: 0 },
     Control { name: "k", key: Key::K, shape: Shape::Circle { cx: 0.500, cy: 0.500, r: 0.028 }, label: Label::Text("K"), contexts: 0 },
 ];

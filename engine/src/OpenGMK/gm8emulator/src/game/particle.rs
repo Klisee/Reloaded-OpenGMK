@@ -156,6 +156,12 @@ impl Manager {
         PSIterDrawOrder(0)
     }
 
+    /// Number of live particles across every system. The debug overlay uses it to show how loaded
+    /// the room is; systems are handle lists with holes, so this walks the live ones.
+    pub fn particle_count(&self) -> usize {
+        self.systems.iter().flatten().map(|system| system.particles.len()).sum()
+    }
+
     pub fn create_type(&mut self) -> i32 {
         let pt = Box::new(ParticleType::new());
         if let Some(id) = self.types.iter().position(|x| x.is_none()) {

@@ -52,6 +52,8 @@ interface SettingsStore {
     var touchOpacity: Float
     var keepAspect: Boolean
     var showFps: Boolean
+    /// Render backend: "auto" (OpenGL, the safe default), "opengl" or "vulkan" (wgpu).
+    var renderer: String
     var modsEnabled: Boolean
     var controlBindings: Map<ControlAction, Int>
     var stickEnabled: Boolean

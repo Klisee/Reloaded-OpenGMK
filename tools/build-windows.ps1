@@ -11,7 +11,7 @@ if (-not (Test-Path $engine)) {
 
 Push-Location $engine
 try {
-    cargo build --release -p gm8emulator
+    cargo build --release -p gm8emulator --features backend-wgpu
 } finally {
     Pop-Location
 }

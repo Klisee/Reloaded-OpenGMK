@@ -25,6 +25,7 @@ data class TouchControlSpec(
         "alt" -> "Alt / AltGr"
         "ctrl" -> "Ctrl"
         "f3" -> "F3 (trucos)"
+        "tab" -> "Tab (panel de depuración)"
         "h" -> "H (hora)"
         "k" -> "K (mega)"
         else -> label
@@ -85,6 +86,7 @@ object TouchLayouts {
         TouchControlSpec("ctrl", "Ctrl", .5f, .5f, .028f, emptySet(), null),
         TouchControlSpec("d", "D", .5f, .5f, .028f, emptySet(), null),
         TouchControlSpec("f3", "F3", .5f, .5f, .028f, emptySet(), null),
+        TouchControlSpec("tab", "Tab", .5f, .5f, .028f, emptySet(), null),
         TouchControlSpec("h", "H", .5f, .5f, .028f, emptySet(), null),
         TouchControlSpec("k", "K", .5f, .5f, .028f, emptySet(), null),
     )

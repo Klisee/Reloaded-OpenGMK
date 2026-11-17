@@ -52,6 +52,13 @@ class IosSettings : SettingsStore {
         get() = string("showFps", "0") == "1"
         set(value) = put("showFps", if (value) "1" else "0")
 
+    override var renderer: String
+        get() = when (string("renderer", "auto")) {
+            "opengl", "vulkan" -> string("renderer", "auto")
+            else -> "auto"
+        }
+        set(value) = put("renderer", if (value == "opengl" || value == "vulkan") value else "auto")
+
     override var modsEnabled: Boolean
         get() = string("modsEnabled", "0") == "1"
         set(value) = put("modsEnabled", if (value) "1" else "0")

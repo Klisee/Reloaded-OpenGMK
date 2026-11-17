@@ -2,6 +2,8 @@
 impl RendererTrait for RendererImpl {
     fn as_any(&self) -> &dyn Any { trait_state::as_any(self) }
     fn max_texture_size(&self) -> u32 { trait_state::max_texture_size(self) }
+    fn debug_info(&self) -> crate::render::DebugInfo { trait_state::debug_info(self) }
+    fn owns_surface(&self) -> bool { true }
     fn push_atlases(&mut self, atl: AtlasBuilderAny) -> Result<(), String> { trait_textures::push_atlases(self, atl) }
     fn upload_sprite( &mut self, data: Box<[u8]>, width: i32, height: i32, origin_x: i32, origin_y: i32, ) -> Result<AtlasRef, String> { trait_textures::upload_sprite(self, data, width, height, origin_x, origin_y) }
     fn duplicate_sprite(&mut self, atlas_ref: AtlasRef) -> Result<AtlasRef, String> { trait_textures::duplicate_sprite(self, atlas_ref) }
@@ -10,9 +12,11 @@ impl RendererTrait for RendererImpl {
     fn set_vsync(&self, vsync: bool) { trait_state::set_vsync(self, vsync) }
     fn get_vsync(&self) -> bool { trait_state::get_vsync(self) }
     fn wait_vsync(&self) { trait_state::wait_vsync(self) }
+    fn set_ui_quads(&mut self, quads: Vec<crate::render::UiQuad>) { trait_surfaces::set_ui_quads(self, quads) }
     fn set_draw_offset(&mut self, x: f64, y: f64) { trait_state::set_draw_offset(self, x, y) }
     fn set_interp_amount(&mut self, amount: f32) { trait_state::set_interp_amount(self, amount) }
     fn get_rect(&self, id: AtlasRef) -> Option<&AtlasRect> { trait_textures::get_rect(self, id) }
+    fn atlas_size(&self, atlas_id: u32) -> Option<(u32, u32)> { self.textures.size(atlas_id) }
     fn set_sprite_origin(&mut self, id: AtlasRef, origin_x: f32, origin_y: f32) { trait_textures::set_sprite_origin(self, id, origin_x, origin_y) }
     fn draw_sprite_general( &mut self, texture: AtlasRef, part_x: f64, part_y: f64, part_w: f64, part_h: f64, x: f64, y: f64, xscale: f64, yscale: f64, angle: f64, col1: i32, col2: i32, col3: i32, col4: i32, alpha: f64, use_origin: bool, ) { trait_geometry::draw_sprite_general(self, texture, part_x, part_y, part_w, part_h, x, y, xscale, yscale, angle, col1, col2, col3, col4, alpha, use_origin) }
     fn draw_sprite_pos( &mut self, texture: AtlasRef, x1: f64, y1: f64, x2: f64, y2: f64, x3: f64, y3: f64, x4: f64, y4: f64, alpha: f64 ) { trait_geometry::draw_sprite_pos(self, texture, x1, y1, x2, y2, x3, y3, x4, y4, alpha) }

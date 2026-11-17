@@ -255,6 +255,11 @@ pub struct Game {
     pub render_fps: u32,
     /// Whether the optional FPS overlay is drawn by the engine.
     pub show_fps: bool,
+    /// Whether the TAB debug overlay (the engine's own F3, Minecraft style) is showing.
+    ///
+    /// It only reads state; nothing in the overlay changes the game. TAB is free: the decompiled
+    /// game never calls `keyboard_check` on it (`vk_tab` does not appear in its GML).
+    pub debug_overlay: bool,
     pub transition_kind: i32,     // default 0
     pub transition_steps: i32,    // default 80
     pub cursor_sprite: i32,       // default -1
@@ -1632,6 +1637,7 @@ impl Game {
             frame_counter: 0,
             render_fps: 0,
             show_fps: false,
+            debug_overlay: false,
             parameters: game_arguments,
             encoding,
             esc_close_game: settings.esc_close_game,
@@ -2560,11 +2566,17 @@ impl Game {
         // Held for the whole frame, so the activity cannot destroy the surface while this frame is
         // being drawn. Without it, detaching mid-frame makes the next OpenGL call answer
         // GL_INVALID_OPERATION, which the engine treats as fatal and which killed the render thread.
+        // The EGL surface belongs to the OpenGL backend; wgpu owns its own surface and must not be
+        // gated on EGL, or the Android loop would stop drawing after the first frame.
         #[cfg(target_os = "android")]
-        let _frame = crate::render::opengl::egl::frame_guard();
+        let _frame = if self.renderer.owns_surface() {
+            None
+        } else {
+            Some(crate::render::opengl::egl::frame_guard())
+        };
 
         #[cfg(target_os = "android")]
-        {
+        if !self.renderer.owns_surface() {
             // The driver lost the context (rare, usually a GPU reset). Every GL object the game
             // holds belongs to the old one, so the only safe recovery is a new session: end this
             // one cleanly instead of drawing garbage or dying on the first GL error.
@@ -2601,6 +2613,15 @@ impl Game {
         if self.input.keyboard_check_pressed(input::Button::F3 as u8) {
             eprintln!("[battle-test] F3");
             let _ = self.start_test_battle();
+        }
+
+        // TAB cycles the debug overlay, like Minecraft's F3. The game never reads TAB, so it is
+        // free; it is only honoured in a normal play session so recordings and replays stay exact.
+        if self.play_type == PlayType::Normal
+            && !self.interp_draw
+            && self.input.keyboard_check_pressed(input::Button::Tab as u8)
+        {
+            self.debug_overlay = !self.debug_overlay;
         }
 
         // Intercept the main menu's multiplayer action before the title controller opens the game's
@@ -6607,10 +6628,14 @@ impl Game {
     /// state the draw path normally writes are restored afterwards.
     fn render_only(&mut self) -> gml::Result<()> {
         #[cfg(target_os = "android")]
-        let _frame = crate::render::opengl::egl::frame_guard();
+        let _frame = if self.renderer.owns_surface() {
+            None
+        } else {
+            Some(crate::render::opengl::egl::frame_guard())
+        };
 
         #[cfg(target_os = "android")]
-        {
+        if !self.renderer.owns_surface() {
             if crate::render::opengl::egl::context_lost() {
                 eprintln!("[gl] contexto perdido: terminando la sesion para reconstruir el renderer");
                 self.scene_change = Some(SceneChange::End);

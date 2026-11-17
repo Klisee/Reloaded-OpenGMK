@@ -27,6 +27,7 @@ object EngineConfig {
                 appendLine("scaling=$scaling")
                 appendLine("render=$render")
                 appendLine("show_fps=$showFps")
+                appendLine("renderer=${settings.renderer}")
             },
         )
         settings.writeControls(settings.controlBindings, settings.stickEnabled, padConnected)

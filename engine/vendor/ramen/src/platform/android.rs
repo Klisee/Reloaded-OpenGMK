@@ -63,6 +63,14 @@ pub fn set_native_window(window: *mut c_void, width: u32, height: u32) {
     s.height = height;
 }
 
+/// The `ANativeWindow*` the activity is using right now, or null before the first window arrives.
+///
+/// A backend that keeps a surface of its own (wgpu, for one) needs to notice when Android replaces
+/// the window underneath it: the old pointer is destroyed and frames sent to it vanish silently.
+pub fn live_native_window() -> *mut c_void {
+    state().lock().unwrap().window
+}
+
 pub fn push_input(ev: InputEvent) {
     state().lock().unwrap().queue.push_back(ev);
 }

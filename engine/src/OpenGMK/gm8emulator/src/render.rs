@@ -421,11 +421,72 @@ impl VertexBuffer {
     }
 }
 
+/// Datos del backend de render para el overlay de diagnóstico.
+///
+/// Cada campo es opcional porque no todos los backends pueden rellenarlos todos: OpenGL conoce su
+/// `GL_VERSION` y su `GL_VENDOR`, mientras que wgpu conoce el adaptador, su tipo y la API elegida.
+#[derive(Clone, Debug, Default)]
+pub struct DebugInfo {
+    /// Backend en uso, tal como lo nombra el motor: "OpenGL", "Vulkan", "GLES"...
+    pub backend: String,
+    /// Nombre del dispositivo (el adaptador en wgpu, el `GL_RENDERER` en OpenGL).
+    pub device: String,
+    /// Versión de la API gráfica.
+    pub api_version: String,
+    /// Versión del driver, si se conoce.
+    pub driver: String,
+    /// Tamaño del framebuffer del juego.
+    pub framebuffer: (u32, u32),
+    /// Tamaño real de la ventana.
+    pub window: (u32, u32),
+    /// Escalado en uso.
+    pub scaling: String,
+    /// Si el backend dibuja a un lienzo intermedio y escala después.
+    pub offscreen: bool,
+    /// Límite de textura del dispositivo.
+    pub max_texture: u32,
+}
+
+/// One rectangle of the UI overlay, in window pixels with the origin at the top-left corner.
+///
+/// It is drawn after the game has been scaled to the window, so a 12 px glyph stays 12 px at any
+/// window size, the way a HUD should look.
+#[derive(Clone, Copy, Debug)]
+pub struct UiQuad {
+    /// Destination rectangle in window pixels: `(x, y, width, height)`.
+    pub rect: (f32, f32, f32, f32),
+    /// Sprite or glyph to sample; `None` draws a flat rectangle of `colour`.
+    pub atlas: Option<AtlasRef>,
+    /// Which part of the sprite to sample, in 0..1: `(u0, v0, u1, v1)`. Ignored when
+    /// `atlas` is `None`.
+    pub uv: (f32, f32, f32, f32),
+    /// Straight (non-premultiplied) RGBA, 0..1.
+    pub colour: [f32; 4],
+}
+
 pub struct Renderer(Box<dyn RendererTrait>);
 
 pub trait RendererTrait {
     fn as_any(&self) -> &dyn Any;
     fn max_texture_size(&self) -> u32;
+
+    /// Datos del backend para el overlay de diagnóstico (el F3 propio del motor).
+    ///
+    /// Lo que no aplique al backend se deja en `None`. Es solo informativo: nada del overlay cambia
+    /// el estado del renderer.
+    fn debug_info(&self) -> DebugInfo {
+        DebugInfo::default()
+    }
+
+    /// Whether this backend owns its drawing surface instead of using the EGL one.
+    ///
+    /// The Android frame loop keeps an EGL surface for OpenGL and skips drawing while there is
+    /// none; wgpu builds and recreates its own `wgpu::Surface`, so those checks do not apply to it
+    /// and would stop it after the first frame.
+    fn owns_surface(&self) -> bool {
+        false
+    }
+
     fn push_atlases(&mut self, atl: atlas::AtlasBuilder) -> Result<(), String>;
     fn upload_sprite(
         &mut self,
@@ -447,6 +508,18 @@ pub trait RendererTrait {
     fn get_vsync(&self) -> bool;
     fn wait_vsync(&self);
 
+    /// Replaces the UI overlay drawn on top of the next presented frame.
+    ///
+    /// The game is drawn at its own resolution (320x180 for Reloaded) and scaled to the window at
+    /// the very end. Anything drawn in game pixels would be scaled with it, which makes small text
+    /// huge. The UI overlay has to look the same whatever the window size, so the backend draws it
+    /// after that scale, in real window pixels.
+    ///
+    /// The quads are in window pixels with the origin at the top-left corner, like the game's own
+    /// coordinates. `atlas` is `None` for a flat colour and `Some` for a sprite or glyph. The list
+    /// is replaced every frame (an empty list removes the overlay) and is cleared once presented.
+    fn set_ui_quads(&mut self, _quads: Vec<UiQuad>) {}
+
     /// Sets the interpolation offset applied to every vertex submitted from now on. Call it before
     /// each instance's draw event and reset it to zero afterwards.
     fn set_draw_offset(&mut self, x: f64, y: f64);
@@ -455,6 +528,14 @@ pub trait RendererTrait {
     fn set_interp_amount(&mut self, amount: f32);
 
     fn get_rect(&self, id: AtlasRef) -> Option<&AtlasRect>;
+
+    /// Size in pixels of the atlas texture with that id.
+    ///
+    /// The UI overlay samples glyphs directly, so it needs to turn a cell's pixel rectangle into
+    /// normalised UVs.
+    fn atlas_size(&self, _atlas_id: u32) -> Option<(u32, u32)> {
+        None
+    }
 
     /// Updates a sprite's origin (in pixels). GM's `sprite_set_offset` changes the origin after the
     /// sprite has been uploaded, so the renderer has to be told about it too or the sprite keeps
@@ -868,6 +949,22 @@ impl Renderer {
         self.0.max_texture_size()
     }
 
+    /// Datos del backend para el overlay de diagnóstico, con el tamaño del lienzo y la ventana.
+    ///
+    /// El backend rellena lo suyo (API, dispositivo, límites); el tamaño del framebuffer y de la
+    /// ventana se añaden aquí porque los conoce el motor, no el renderer.
+    pub fn debug_info(&self, framebuffer: (u32, u32), window: (u32, u32), scaling: crate::render::Scaling) -> DebugInfo {
+        let mut info = self.0.debug_info();
+        info.framebuffer = framebuffer;
+        info.window = window;
+        info.scaling = match scaling {
+            Scaling::Fixed(scale) => format!("Fixed({scale})"),
+            Scaling::Aspect(_) => "Aspect".to_string(),
+            Scaling::Full => "Full".to_string(),
+        };
+        info
+    }
+
     pub fn push_atlases(&mut self, atl: atlas::AtlasBuilder) -> Result<(), String> {
         self.0.push_atlases(atl)
     }
@@ -910,6 +1007,27 @@ impl Renderer {
     pub fn wait_vsync(&self) {
         self.0.wait_vsync()
     }
+
+    /// Replaces the UI overlay for the next frame; see [`RendererTrait::set_ui_quads`].
+    pub fn set_ui_quads(&mut self, quads: Vec<UiQuad>) {
+        self.0.set_ui_quads(quads)
+    }
+
+    /// Whether the backend owns its surface; see [`RendererTrait::owns_surface`].
+    pub fn owns_surface(&self) -> bool {
+        self.0.owns_surface()
+    }
+
+    /// Size in pixels of an atlas texture; see [`RendererTrait::atlas_size`].
+    pub fn atlas_size(&self, atlas_id: u32) -> Option<(u32, u32)> {
+        self.0.atlas_size(atlas_id)
+    }
+
+    /// Rectangle of a sprite in its atlas; see [`RendererTrait::get_rect`].
+    pub fn get_rect(&self, id: AtlasRef) -> Option<&AtlasRect> {
+        self.0.get_rect(id)
+    }
+
 
     pub fn set_draw_offset(&mut self, x: f64, y: f64) {
         self.0.set_draw_offset(x, y)
