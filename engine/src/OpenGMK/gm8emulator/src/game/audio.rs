@@ -177,8 +177,8 @@ impl Drop for AudioManager {
 }
 
 impl AudioManager {
-    /// An audio manager that produces no output. Used on platforms without an audio backend yet.
-    #[cfg(target_os = "android")]
+    /// An audio manager that produces no output. Used on platforms without an audio backend
+    /// and when the machine has no output device (VMs, servers, RDP sessions).
     fn disabled() -> Self {
         Self {
             mixer: None,
@@ -241,15 +241,19 @@ impl AudioManager {
     #[cfg(not(target_os = "android"))]
     fn new_desktop(do_output: bool, capture_audio: bool) -> Self {
         // TODO: not all these unwraps
-        let session = Session::new(session_api()).unwrap();
+        let session = match Session::new(session_api()) {
+            Ok(session) => session,
+            Err(e) => {
+                eprintln!("[audio] no se pudo abrir la sesion de audio ({:?}); sigo sin sonido", e);
+                return Self::disabled();
+            }
+        };
         let device = match session.default_output_device() {
             Ok(device) => device,
-            Err(_) => {
-                #[cfg(not(target_os = "android"))]
-                panic!("no se pudo obtener el dispositivo de audio de salida");
-                #[cfg(target_os = "android")]
+            Err(e) => {
+                eprintln!("[audio] no hay dispositivo de audio de salida ({:?}); sigo sin sonido", e);
                 return Self::disabled();
-            },
+            }
         };
         let sample_rate = device.sample_rate();
         let channel_count = device.channel_count();

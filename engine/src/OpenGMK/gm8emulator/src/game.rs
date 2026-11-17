@@ -802,10 +802,15 @@ impl Game {
             crate::render::opengl::glx::glx_init(display, screen);
         }
 
+        // The window has to look like the launcher's, not like a separate app: the dock/taskbar
+        // groups windows by WM_CLASS and without a matching .desktop entry the game shows up with
+        // a generic icon and its own name. The launcher passes its own class here.
+        let wm_class = std::env::var("OPENGMK_WM_CLASS").unwrap_or_else(|_| "OpenGMK".to_string());
+
         #[allow(unused_mut)]
         let mut builder = connection
             .builder()
-            .class_name("OpenGMK")
+            .class_name(wm_class)
             .visible(false)
             .maximised(true)
             .size((width as _, height as _))

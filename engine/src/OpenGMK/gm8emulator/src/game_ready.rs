@@ -248,6 +248,50 @@ mod android {
 #[cfg(target_os = "android")]
 pub use android::{destroy, game_error, poll, start_session};
 
+/// The process-wide signal used by the desktop launcher.
+///
+/// Desktop has no Activity to poll from: the launcher spawns the engine and keeps its own
+/// "Cargando…" screen on screen. The engine writes a marker file once it has actually painted,
+/// so the launcher knows when to step aside (send its window to the back, so the game is what
+/// the user sees) and keeps running to come back when the engine exits.
+#[cfg(not(target_os = "android"))]
+mod desktop {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Frames painted so far. The first one is often an empty surface right after mapping the
+    /// window; waiting for a couple of them means the compositor already has game pixels.
+    static PAINTED: AtomicUsize = AtomicUsize::new(0);
+
+    /// Where the launcher wants the marker. Without it, there is no launcher to notify.
+    fn marker_path() -> Option<std::path::PathBuf> {
+        std::env::var_os("OPENGMK_READY_FILE").map(std::path::PathBuf::from)
+    }
+
+    fn write_marker(text: &[u8]) {
+        let Some(path) = marker_path() else { return };
+        let tmp = path.with_extension("tmp");
+        if std::fs::write(&tmp, text).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
+        }
+    }
+
+    /// Called from the renderer right after presenting a frame.
+    pub fn presented() {
+        if PAINTED.fetch_add(1, Ordering::Relaxed) == 2 {
+            write_marker(b"ready");
+        }
+    }
+
+    /// Reports that the game failed to start, before any window exists.
+    pub fn game_error() {
+        write_marker(b"error");
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+pub use desktop::{game_error, presented};
+
 #[cfg(test)]
 mod tests {
     use super::*;

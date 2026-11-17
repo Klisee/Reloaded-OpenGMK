@@ -7,8 +7,12 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.LocalFontFamilyResolver
@@ -34,6 +38,12 @@ import java.awt.image.BufferedImage
 import java.io.File
 import javax.imageio.ImageIO
 
+/**
+ * WM_CLASS del launcher en Linux. Viene de `startupWMClass` en `build.gradle.kts`; el motor usa
+ * el mismo para que el dock agrupe ambas ventanas como una sola aplicación, con su icono y nombre.
+ */
+internal const val LAUNCHER_WM_CLASS = "com-klisee-reloaded-gmk-MainKt"
+
 private fun isWindows(): Boolean =
     System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
 
@@ -58,6 +68,7 @@ fun runWindowsApplication(root: File) {
         fontFamily: FontFamily = FontFamily.SansSerif,
         logo: Painter? = null,
         onLauncherClose: (() -> Unit)? = null,
+        onEngineStarted: ((Process) -> Unit)? = null,
     ) {
         val scope = rememberCoroutineScope()
         App(
@@ -141,6 +152,8 @@ fun runWindowsApplication(root: File) {
                         }
                         writeLog("Video: render=$renderMode showFps=${settings.showFps} backend=${backend ?: "auto"}\n")
                         runCatching {
+                            val readyMarker = File(root, "engine-ready")
+                            readyMarker.delete()
                             val builder = ProcessBuilder(engine.absolutePath, exe.absolutePath)
                                 .directory(jvmRepo.gameDir)
                                 .redirectErrorStream(true)
@@ -152,29 +165,26 @@ fun runWindowsApplication(root: File) {
                             builder.environment()["OPENGMK_RENDER_HZ"] = detectedHz.toString()
                             builder.environment()["OPENGMK_CONTROLS"] =
                                 java.io.File(root, "controls.conf").absolutePath
+                            builder.environment()["OPENGMK_READY_FILE"] = readyMarker.absolutePath
+                            // Que la ventana del juego se agrupe con el launcher: mismo WM_CLASS,
+                            // mismo icono y mismo nombre en el dock, en vez de "OpenGMK" aparte.
+                            // RESOURCE_NAME fija la instancia; el motor pone la clase.
+                            builder.environment()["OPENGMK_WM_CLASS"] = LAUNCHER_WM_CLASS
+                            builder.environment()["RESOURCE_NAME"] = LAUNCHER_WM_CLASS
                             val engineProcess = builder.start()
-                            if (isWindows()) {
-                                val selfExe = System.getProperty("jpackage.app-path")
-                                val watcher = brandEngineWindow(engineProcess.pid(), root, log, selfExe, ::writeLog)
-                                when {
-                                    !watcher -> writeLog("No se pudo iniciar el vigilante; el launcher seguirá abierto.\n")
-                                    selfExe.isNullOrBlank() -> writeLog(
-                                        "Launcher sin jpackage.app-path; se mantiene abierto para poder volver.\n",
-                                    )
-                                    else -> onLauncherClose?.invoke()
-                                }
+                            onEngineStarted?.invoke(engineProcess)
+                            val selfExe = System.getProperty("jpackage.app-path")
+                            val watcher = if (isWindows()) {
+                                brandEngineWindow(engineProcess.pid(), root, log, selfExe, ::writeLog)
                             } else {
-                                val selfExe = System.getProperty("jpackage.app-path")
-                                val watcher = brandLinuxEngineWindow(engineProcess.pid(), root, log, selfExe, ::writeLog)
-                                when {
-                                    !watcher -> writeLog("No se pudo iniciar el vigilante; el launcher seguirá abierto.\n")
-                                    selfExe.isNullOrBlank() -> writeLog(
-                                        "Launcher sin ruta de ejecutable; se mantiene abierto para poder volver.\n",
-                                    )
-                                    else -> onLauncherClose?.invoke()
-                                }
+                                brandLinuxEngineWindow(engineProcess.pid(), root, log, selfExe, ::writeLog)
                             }
-                        }.onFailure { writeLog("No se pudo iniciar el motor: ${it.message}\n") }
+                            if (!watcher) {
+                                writeLog("No se pudo iniciar el vigilante; el launcher seguirá abierto.\n")
+                            }
+                        }.onFailure {
+                            writeLog("No se pudo iniciar el motor: ${it.message}\n")
+                        }
                     }
                 }
             },
@@ -194,32 +204,89 @@ fun runWindowsApplication(root: File) {
 
     application {
         val appIcon = painterResource("icon.png")
+        // Mientras el motor arranca, el launcher se queda con la pantalla "Cargando..." (igual
+        // que en Android). Cuando el motor ya pintó su primer frame, la ventana del juego se
+        // queda delante y el launcher pasa detrás (sin minimizar ni ocultar: en Wayland/XWayland
+        // ni ocultar ni minimizar la última ventana son fiables, y ocultarla puede terminar la
+        // app). Al salir del juego el launcher vuelve al frente, sin cerrarlo ni relanzarlo.
+        var launching by remember { mutableStateOf(false) }
+        var engine by remember { mutableStateOf<Process?>(null) }
+        var engineReady by remember { mutableStateOf(false) }
         Window(
             onCloseRequest = ::exitApplication,
             title = "Reloaded OpenGMK",
             icon = appIcon,
             state = rememberWindowState(size = DpSize(1280.dp, 820.dp), placement = WindowPlacement.Maximized),
         ) {
+            LaunchedEffect(engine) {
+                val process = engine
+                if (process == null) {
+                    if (!launching) {
+                        engineReady = false
+                    }
+                    return@LaunchedEffect
+                }
+                val marker = File(root, "engine-ready")
+                val started = System.currentTimeMillis()
+                try {
+                    while (process.isAlive) {
+                        if (!engineReady) {
+                            val signalled = marker.isFile
+                            val timedOut = System.currentTimeMillis() - started > 25_000
+                            if (signalled || timedOut) {
+                                marker.delete()
+                                engineReady = true
+                                // El motor ya tiene píxeles en pantalla: nos apartamos de su camino.
+                                runCatching { window.toBack() }
+                            }
+                        }
+                        kotlinx.coroutines.delay(120)
+                    }
+                } finally {
+                    marker.delete()
+                    engineReady = false
+                    launching = false
+                    runCatching {
+                        window.toFront()
+                        window.requestFocus()
+                    }
+                }
+            }
             if (isWindows()) {
                 val fontResolver = remember { createFontFamilyResolver() }
                 CompositionLocalProvider(LocalFontFamilyResolver provides fontResolver) {
                     FluentTheme {
-                        AppContent(
-                            colorScheme = FluentTheme.colors.toMaterialScheme(),
-                            shapes = Shapes(
-                                extraSmall = RoundedCornerShape(4.dp),
-                                small = RoundedCornerShape(6.dp),
-                                medium = RoundedCornerShape(8.dp),
-                                large = RoundedCornerShape(12.dp),
-                                extraLarge = RoundedCornerShape(16.dp),
-                            ),
-                            logo = appIcon,
-                            onLauncherClose = { exitApplication() },
-                        )
+                        DesktopOverlayRoot(visible = launching && !engineReady, logo = appIcon) {
+                            AppContent(
+                                colorScheme = FluentTheme.colors.toMaterialScheme(),
+                                shapes = Shapes(
+                                    extraSmall = RoundedCornerShape(4.dp),
+                                    small = RoundedCornerShape(6.dp),
+                                    medium = RoundedCornerShape(8.dp),
+                                    large = RoundedCornerShape(12.dp),
+                                    extraLarge = RoundedCornerShape(16.dp),
+                                ),
+                                logo = appIcon,
+                                onLauncherClose = { exitApplication() },
+                                onEngineStarted = {
+                                    launching = true
+                                    engine = it
+                                },
+                            )
+                        }
                     }
                 }
             } else {
-                AppContent(logo = appIcon, onLauncherClose = { exitApplication() })
+                DesktopOverlayRoot(visible = launching && !engineReady, logo = appIcon) {
+                    AppContent(
+                        logo = appIcon,
+                        onLauncherClose = { exitApplication() },
+                        onEngineStarted = {
+                            launching = true
+                            engine = it
+                        },
+                    )
+                }
             }
         }
     }

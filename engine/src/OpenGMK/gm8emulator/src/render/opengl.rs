@@ -4391,6 +4391,11 @@ impl RendererTrait for RendererImpl {
             // SwapBuffers will return TRUE i.e. no error, but glGetError will return GL_INVALID_OPERATION.
             // This hack evades the error, but a less awful solution would be really nice to have.
             self.gl.GetError();
+
+            // The launcher's "Cargando…" screen steps aside only once the game has actually been
+            // painted, not when the window is merely mapped.
+            #[cfg(not(target_os = "android"))]
+            crate::game_ready::presented();
         }
     }
 

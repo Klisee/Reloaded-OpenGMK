@@ -287,6 +287,9 @@ pub fn run_game(args: Vec<String>) -> i32 {
         Ok(g) => g,
         Err(e) => {
             eprintln!("Failed to launch game: {}", e);
+            // A launcher may be showing its own loading screen: let it know the game never started.
+            #[cfg(not(target_os = "android"))]
+            crate::game_ready::game_error();
             return EXIT_FAILURE;
         },
     };

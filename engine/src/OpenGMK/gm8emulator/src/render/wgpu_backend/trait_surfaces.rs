@@ -166,6 +166,10 @@ pub(crate) fn present(r: &mut RendererImpl, window_width: u32, window_height: u3
         r.frame.prepared.clear();
         r.frame.clears.clear();
         r.queue.present(surface_texture);
+        // The launcher's "Cargando…" screen steps aside only once the game has actually been
+        // painted, not when the window is merely mapped.
+        #[cfg(not(target_os = "android"))]
+        crate::game_ready::presented();
 }
 
 
