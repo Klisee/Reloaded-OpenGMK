@@ -653,7 +653,15 @@ impl RendererImpl {
         let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
         // One backend list for every platform: Vulkan and GL everywhere, DX12 on Windows. wgpu
         // picks the best one the machine actually has.
-        desc.backends = wgpu::Backends::VULKAN | wgpu::Backends::GL | wgpu::Backends::DX12;
+        //
+        // `OPENGMK_WGPU_BACKEND` narrows it down for testing (dx12, vulkan or gl): without it,
+        // forcing a backend on a machine that lacks it was impossible.
+        desc.backends = match std::env::var("OPENGMK_WGPU_BACKEND").unwrap_or_default().trim().to_ascii_lowercase().as_str() {
+            "dx12" | "d3d12" | "directx" => wgpu::Backends::DX12,
+            "vulkan" | "vk" => wgpu::Backends::VULKAN,
+            "gl" | "gles" | "opengl" => wgpu::Backends::GL,
+            _ => wgpu::Backends::VULKAN | wgpu::Backends::GL | wgpu::Backends::DX12,
+        };
         desc.display = Some(Box::new(display));
         let instance = wgpu::Instance::new(desc);
 
