@@ -127,6 +127,12 @@ expect fun readLog(repo: GameStore): String
 expect fun formatDate(millis: Long): String
 expect fun platformLabel(): String
 
+/// Name of the graphics API the wgpu backend uses on this platform.
+///
+/// wgpu picks the best one the machine has: Direct3D 12 on Windows, Vulkan on Linux and Android.
+/// The settings screen shows this instead of a fixed "Vulkan", which was simply wrong on Windows.
+expect fun gpuBackendLabel(): String
+
 @Composable
 expect fun TouchAssetsScreen(
     settings: SettingsStore,

@@ -61,6 +61,8 @@ actual fun TouchAssetsScreen(
 
 actual fun platformLabel(): String = "iOS"
 
+actual fun gpuBackendLabel(): String = "Metal"
+
 actual fun systemLanguage(): String = "es"
 
 

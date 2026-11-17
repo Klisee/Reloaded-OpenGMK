@@ -3110,7 +3110,7 @@ private fun MaterialSettingsScreen(
                                         Icons.Filled.Memory,
                                         "Renderizador",
                                         when (renderer) {
-                                            "vulkan" -> "Vulkan (wgpu), experimental"
+                                            "vulkan" -> "${gpuBackendLabel()} (wgpu), experimental"
                                             "opengl" -> "OpenGL, forzado"
                                             else -> "Automático (OpenGL)"
                                         },
@@ -3229,7 +3229,7 @@ private fun MaterialSettingsScreen(
                         ) { renderer = "opengl"; settings.renderer = "opengl"; showRenderer = false }
                         ChoiceRow(
                             icon = Icons.Filled.Memory,
-                            title = "Vulkan",
+                            title = gpuBackendLabel(),
                             subtitle = "Backend nuevo sobre wgpu. Experimental; puede ir más fino en equipos modernos.",
                             selected = renderer == "vulkan",
                             items = 3,
@@ -3421,7 +3421,7 @@ private fun MaterialSettingsScreen(
                     icon = Icons.Filled.Memory,
                     title = "Renderizador",
                     subtitle = when (renderer) {
-                        "vulkan" -> "Vulkan (wgpu), experimental"
+                        "vulkan" -> "${gpuBackendLabel()} (wgpu), experimental"
                         "opengl" -> "OpenGL, forzado"
                         else -> "Automático (OpenGL)"
                     },
@@ -3520,7 +3520,7 @@ private fun MaterialSettingsScreen(
                         ) { renderer = "opengl"; settings.renderer = "opengl"; showRenderer = false }
                         ChoiceRow(
                             icon = Icons.Filled.Memory,
-                            title = "Vulkan",
+                            title = gpuBackendLabel(),
                             subtitle = "Backend nuevo sobre wgpu. Experimental; puede ir más fino en móviles modernos.",
                             selected = renderer == "vulkan",
                             items = 3,

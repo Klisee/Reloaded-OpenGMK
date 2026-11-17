@@ -907,7 +907,9 @@ pub enum RenderBackend {
 
 impl RenderBackend {
     /// Lee `OPENGMK_RENDERER` (valores: `gl`, `opengl`, `wgpu`, `auto`).
-    /// En `auto` o vacío devuelve `OpenGl` por ahora: wgpu todavía no está implementado.
+    ///
+    /// With no value, or `auto`, OpenGL is used: it is the backend every port has been tested
+    /// with, and wgpu is still experimental. The launcher lets the player pick wgpu explicitly.
     pub fn from_env() -> Self {
         match std::env::var("OPENGMK_RENDERER").unwrap_or_default().trim().to_ascii_lowercase().as_str() {
             "wgpu" => Self::Wgpu,

@@ -16,3 +16,8 @@ actual fun platformLabel(): String {
     }
     return if (abi.isBlank()) name else "$name $abi"
 }
+
+actual fun gpuBackendLabel(): String {
+    val os = System.getProperty("os.name").orEmpty()
+    return if (os.startsWith("Windows", ignoreCase = true)) "DirectX 12" else "Vulkan"
+}

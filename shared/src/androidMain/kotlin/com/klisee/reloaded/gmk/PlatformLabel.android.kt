@@ -14,3 +14,5 @@ actual fun platformLabel(): String {
     val version = Build.VERSION.RELEASE?.takeIf { it.isNotBlank() }
     return if (version != null) "Android $version · $abi" else "Android · $abi"
 }
+
+actual fun gpuBackendLabel(): String = "Vulkan"
