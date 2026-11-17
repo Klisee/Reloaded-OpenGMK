@@ -2436,6 +2436,8 @@ impl RendererTrait for RendererImpl {
             scaling: String::new(),
             offscreen: true,
             max_texture: self.max_texture_size(),
+            os: crate::render::os_label(),
+            cpu: crate::render::cpu_label(),
         }
     }
 

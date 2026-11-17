@@ -656,11 +656,16 @@ impl RendererImpl {
         //
         // `OPENGMK_WGPU_BACKEND` narrows it down for testing (dx12, vulkan or gl): without it,
         // forcing a backend on a machine that lacks it was impossible.
+        // On Windows Direct3D 12 comes first: it is the native API there, and the one the
+        // experimental backend is meant to use. Vulkan stays in the list as a fallback for
+        // machines without a DX12 driver, and GL after it. `OPENGMK_WGPU_BACKEND` overrides all
+        // of this for testing, and `wgpu` tries the list in order.
         desc.backends = match std::env::var("OPENGMK_WGPU_BACKEND").unwrap_or_default().trim().to_ascii_lowercase().as_str() {
             "dx12" | "d3d12" | "directx" => wgpu::Backends::DX12,
             "vulkan" | "vk" => wgpu::Backends::VULKAN,
             "gl" | "gles" | "opengl" => wgpu::Backends::GL,
-            _ => wgpu::Backends::VULKAN | wgpu::Backends::GL | wgpu::Backends::DX12,
+            _ if cfg!(target_os = "windows") => wgpu::Backends::DX12 | wgpu::Backends::VULKAN | wgpu::Backends::GL,
+            _ => wgpu::Backends::VULKAN | wgpu::Backends::GL,
         };
         desc.display = Some(Box::new(display));
         let instance = wgpu::Instance::new(desc);

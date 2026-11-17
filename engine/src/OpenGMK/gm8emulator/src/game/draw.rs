@@ -1047,6 +1047,10 @@ impl Game {
             // so it reads "OpenGL 3.3.0 ..." on GL and "Vulkan 1.4.305" on wgpu.
             left.push(format!("API: {} {} | driver: {}", renderer.backend, renderer.api_version, renderer.driver));
         }
+        left.push(format!("sistema: {}", renderer.os));
+        if !renderer.cpu.is_empty() {
+            left.push(format!("cpu: {}", renderer.cpu));
+        }
         left.push(format!(
             "modo: {:?} | vsync {} | textura max {}",
             self.render_mode,

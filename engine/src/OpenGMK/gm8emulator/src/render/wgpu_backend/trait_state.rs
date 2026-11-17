@@ -381,6 +381,8 @@ pub(crate) fn debug_info(r: &RendererImpl) -> crate::render::DebugInfo {
                 // Este backend dibuja a un lienzo a resolución del juego y lo escala a la ventana.
                 offscreen: true,
                 max_texture: r.max_texture_size,
+                os: crate::render::os_label(),
+                cpu: crate::render::cpu_label(),
         }
 }
 

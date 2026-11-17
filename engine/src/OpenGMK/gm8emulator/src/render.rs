@@ -445,6 +445,67 @@ pub struct DebugInfo {
     pub offscreen: bool,
     /// Límite de textura del dispositivo.
     pub max_texture: u32,
+    /// Sistema operativo y arquitectura, tal como los ve el motor: "Windows x86_64".
+    pub os: String,
+    /// Modelo de CPU, si el sistema lo expone.
+    pub cpu: String,
+}
+
+/// Operating system and architecture the engine is running on, for the overlay.
+///
+/// It is read from `std::env::consts` instead of uname so it works the same on every target,
+/// including Android and Windows, with no extra dependency.
+pub fn os_label() -> String {
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x86_64",
+        "x86" => "x86",
+        "aarch64" => "arm64",
+        "arm" => "arm",
+        other => other,
+    };
+    let os = match std::env::consts::OS {
+        "windows" => "Windows",
+        "linux" => {
+            if cfg!(target_os = "android") {
+                "Android"
+            } else {
+                "Linux"
+            }
+        },
+        "macos" => "macOS",
+        "ios" => "iOS",
+        other => other,
+    };
+    format!("{os} {arch}")
+}
+
+/// CPU model, best effort. Empty where the platform does not expose it cheaply.
+pub fn cpu_label() -> String {
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(text) = std::fs::read_to_string("/proc/cpuinfo") {
+            for line in text.lines() {
+                if let Some(value) = line.strip_prefix("model name") {
+                    if let Some(value) = value.split_once(':') {
+                        return value.1.trim().to_string()
+                    }
+                }
+            }
+        }
+        return String::new()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // PROCESSOR_IDENTIFIER is set by Windows itself and needs no registry access.
+        if let Ok(value) = std::env::var("PROCESSOR_IDENTIFIER") {
+            return value.trim().to_string()
+        }
+        return String::new()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    {
+        String::new()
+    }
 }
 
 /// One rectangle of the UI overlay, in window pixels with the origin at the top-left corner.
