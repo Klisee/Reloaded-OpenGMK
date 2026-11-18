@@ -305,10 +305,54 @@ impl AudioManager {
                 aaudio_stream: None,
             };
         } else {
+            // El hilo de audio no debe morir en silencio: antes hacía `unwrap()` y, si el backend
+            // de sonido fallaba al abrir el stream, el pánico mataba solo este hilo y el juego
+            // seguía sin sonido y sin ningún mensaje. Con wgpu (DX12/Vulkan) esto pasaba de forma
+            // intermitente porque el dispositivo tarda más en estar listo. Ahora se registra el
+            // error y se reintenta una vez tras una espera corta.
+            //
+            // `open_output_stream` y `play` consumen sus argumentos, así que el reintento vuelve a
+            // pedir el dispositivo a la sesión. El mixer solo se puede mover una vez: se guarda en
+            // un `Option` y se toma al reintentar; si el primer intento ya lo consumió, no hay
+            // segunda oportunidad y el mensaje lo dice.
             std::thread::spawn(move || {
-                let stream = session.open_output_stream(device).unwrap();
-
-                stream.play(mixer).unwrap();
+                let mut mixer = Some(mixer);
+                let mut last_error = String::new();
+                for attempt in 0..2 {
+                    if attempt > 0 {
+                        if mixer.is_none() {
+                            break;
+                        }
+                        eprintln!("[audio] reintento en 250 ms");
+                        std::thread::sleep(std::time::Duration::from_millis(250));
+                    }
+                    let device = match session.default_output_device() {
+                        Ok(device) => device,
+                        Err(e) => {
+                            last_error = format!("no hay dispositivo de audio: {e:?}");
+                            continue;
+                        }
+                    };
+                    let stream = match session.open_output_stream(device) {
+                        Ok(stream) => stream,
+                        Err(e) => {
+                            last_error = format!("no se pudo abrir el stream de salida: {e:?}");
+                            continue;
+                        }
+                    };
+                    match mixer.take() {
+                        Some(source) => match stream.play(source) {
+                            Ok(()) => return,
+                            Err(e) => {
+                                last_error = format!("no se pudo iniciar la reproducción: {e:?}");
+                                // `play` consumió la fuente, así que ya no se puede reintentar.
+                                break;
+                            }
+                        },
+                        None => break,
+                    }
+                }
+                eprintln!("[audio] sigue sin sonido ({last_error}); el juego continuará en silencio");
             });
 
             Self {

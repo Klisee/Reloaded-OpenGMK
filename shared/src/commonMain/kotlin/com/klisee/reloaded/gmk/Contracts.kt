@@ -44,6 +44,12 @@ data class ModEntry(
 interface SettingsStore {
     var onboardingDone: Boolean
     var theme: String
+    /// Modo de color: "auto" (sigue al sistema), "light" u "dark".
+    ///
+    /// Es independiente de `theme`, que elige el estilo visual (Material You o Liquid Glass).
+    /// Antes solo existía `theme` y el claro/oscuro se deducía del sistema; en escritorio la
+    /// detección fallaba siempre y la app se quedaba en claro.
+    var darkMode: String
     var language: String
     var fpsMode: String
     var touchStyle: String
@@ -52,7 +58,11 @@ interface SettingsStore {
     var touchOpacity: Float
     var keepAspect: Boolean
     var showFps: Boolean
-    /// Render backend: "auto" (OpenGL, the safe default), "opengl" or "vulkan" (wgpu).
+    /// Backend de renderizado elegido por el jugador.
+    ///
+    /// `opengl` es el backend histórico, probado en todas las plataformas. `wgpu` es el backend
+    /// nuevo: sobre él se puede pedir una API concreta (DirectX 12, Vulkan o OpenGL por wgpu) con
+    /// `OPENGMK_WGPU_BACKEND`. Cuando la API no se fija, wgpu elige por rendimiento.
     var renderer: String
     var modsEnabled: Boolean
     var controlBindings: Map<ControlAction, Int>
@@ -127,11 +137,17 @@ expect fun readLog(repo: GameStore): String
 expect fun formatDate(millis: Long): String
 expect fun platformLabel(): String
 
-/// Name of the graphics API the wgpu backend uses on this platform.
-///
-/// wgpu picks the best one the machine has: Direct3D 12 on Windows, Vulkan on Linux and Android.
-/// The settings screen shows this instead of a fixed "Vulkan", which was simply wrong on Windows.
+/// Etiqueta de la API que usa el backend wgpu, para mostrar en ajustes.
 expect fun gpuBackendLabel(): String
+
+/// Nombre de la API de wgpu que se le pasa al motor en `OPENGMK_WGPU_BACKEND`.
+///
+/// El motor acepta `dx12`, `vulkan` y `gl`. Se expone como constante para que la pantalla de
+/// ajustes y el lanzador no puedan desincronizarse.
+const val WGPU_BACKEND_DX12 = "dx12"
+const val WGPU_BACKEND_VULKAN = "vulkan"
+const val WGPU_BACKEND_GL = "gl"
+
 
 @Composable
 expect fun TouchAssetsScreen(

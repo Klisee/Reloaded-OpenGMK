@@ -78,6 +78,7 @@ import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Nightlight
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.PlayArrow
@@ -178,11 +179,14 @@ fun App(
     logo: Painter? = null,
     onlineEngine: OnlineEngineStore? = null,
     updateManager: com.klisee.reloaded.gmk.update.UpdateManager? = null,
+    onDarkModeChanged: ((String) -> Unit)? = null,
 ) {
     var theme by remember { mutableStateOf(settings.theme) }
+    var darkMode by remember { mutableStateOf(settings.darkMode) }
     val backdrop = rememberReloadedBackdrop()
     ReloadedTheme(
         theme = theme,
+        darkMode = darkMode,
         fontFamily = fontFamily,
         colorSchemeOverride = colorScheme,
         shapesOverride = shapes,
@@ -359,6 +363,13 @@ fun App(
                     onThemeChange = {
                         settings.theme = it
                         theme = it
+                        revision++
+                    },
+                    darkMode = darkMode,
+                    onDarkModeChange = {
+                        settings.darkMode = it
+                        darkMode = it
+                        onDarkModeChanged?.invoke(it)
                         revision++
                     },
                     onClose = { goTo(AppTab.Home) },
@@ -2735,6 +2746,8 @@ private fun SettingsScreen(
     appVersion: String,
     theme: String,
     onThemeChange: (String) -> Unit,
+    darkMode: String,
+    onDarkModeChange: (String) -> Unit,
     onClose: () -> Unit,
     onOpenUrl: (String) -> Unit,
     supportedAbis: List<String>,
@@ -2748,6 +2761,8 @@ private fun SettingsScreen(
             appVersion = appVersion,
             theme = theme,
             onThemeChange = onThemeChange,
+            darkMode = darkMode,
+            onDarkModeChange = onDarkModeChange,
             onClose = onClose,
             onLogs = onLogs,
             onAbout = onAbout,
@@ -2776,6 +2791,8 @@ private fun SettingsScreen(
             appVersion = appVersion,
             theme = theme,
             onThemeChange = onThemeChange,
+            darkMode = darkMode,
+            onDarkModeChange = onDarkModeChange,
             onOpenUrl = onOpenUrl,
             supportedAbis = supportedAbis,
             onChanged = onChanged,
@@ -2875,6 +2892,8 @@ private fun MaterialSettingsScreen(
     appVersion: String,
     theme: String,
     onThemeChange: (String) -> Unit,
+    darkMode: String,
+    onDarkModeChange: (String) -> Unit,
     onOpenUrl: (String) -> Unit,
     supportedAbis: List<String>,
     onChanged: () -> Unit,
@@ -3089,6 +3108,41 @@ private fun MaterialSettingsScreen(
                             1 -> {
                                 PcSettingsCard("Tema") {
                                     PcSettingRow(
+                                        Icons.Filled.DarkMode,
+                                        "Modo oscuro",
+                                        when (darkMode) {
+                                            "dark" -> "Siempre oscuro"
+                                            "light" -> "Siempre claro"
+                                            else -> "Sigue al sistema"
+                                        },
+                                        trailing = {
+                                            RadioButton(selected = darkMode == "auto", onClick = null)
+                                        },
+                                        onClick = { onDarkModeChange("auto") },
+                                    )
+                                    PcSettingsDivider()
+                                    PcSettingRow(
+                                        Icons.Filled.LightMode,
+                                        "Modo claro forzado",
+                                        "Útil si el sistema no informa el tema",
+                                        trailing = {
+                                            RadioButton(selected = darkMode == "light", onClick = null)
+                                        },
+                                        onClick = { onDarkModeChange("light") },
+                                    )
+                                    PcSettingsDivider()
+                                    PcSettingRow(
+                                        Icons.Filled.DarkMode,
+                                        "Modo oscuro forzado",
+                                        "Negro y azul, como Windows 11",
+                                        trailing = {
+                                            RadioButton(selected = darkMode == "dark", onClick = null)
+                                        },
+                                        onClick = { onDarkModeChange("dark") },
+                                    )
+                                }
+                                PcSettingsCard("Estilo visual") {
+                                    PcSettingRow(
                                         Icons.Filled.Palette,
                                         "Material You",
                                         "Adaptado a los colores del sistema",
@@ -3132,8 +3186,11 @@ private fun MaterialSettingsScreen(
                                         Icons.Filled.Memory,
                                         "Renderizador",
                                         when (renderer) {
-                                            "vulkan" -> "${gpuBackendLabel()} (wgpu), experimental"
                                             "opengl" -> "OpenGL, forzado"
+                                            "dx12" -> "DirectX 12 (wgpu)"
+                                            "vulkan" -> "Vulkan (wgpu)"
+                                            "gl" -> "OpenGL por wgpu"
+                                            "wgpu" -> "wgpu, automático"
                                             else -> "Automático (OpenGL)"
                                         },
                                         onClick = { showRenderer = true },
@@ -3225,35 +3282,37 @@ private fun MaterialSettingsScreen(
             SnackbarHost(snackbar, modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp))
         }
         if (showRenderer) {
+            val options = if (desktop) {
+                listOf(
+                    Triple("auto", "Automático", "OpenGL, el backend probado. Es lo que se usa por defecto."),
+                    Triple("opengl", "OpenGL", "Fuerza el backend clásico en todas las plataformas."),
+                    Triple("dx12", "DirectX 12", "wgpu sobre Direct3D 12. El más rápido en Windows modernos."),
+                    Triple("vulkan", "Vulkan", "wgpu sobre Vulkan. Buen rendimiento en Windows y Linux."),
+                    Triple("gl", "OpenGL por wgpu", "wgpu sobre OpenGL. Útil si fallan DX12 y Vulkan."),
+                    Triple("wgpu", "wgpu automático", "Deja que wgpu elija la mejor API disponible."),
+                )
+            } else {
+                listOf(
+                    Triple("auto", "Automático", "OpenGL, el backend probado. Es lo que se usa por defecto."),
+                    Triple("opengl", "OpenGL", "Fuerza el backend clásico en todas las plataformas."),
+                    Triple("vulkan", gpuBackendLabel(), "Backend wgpu. Experimental; puede ir más fino en móviles modernos."),
+                )
+            }
             AlertDialog(
                 onDismissRequest = { showRenderer = false },
                 title = { Text("Renderizador") },
                 text = {
                     Column {
-                        ChoiceRow(
-                            icon = Icons.Filled.Memory,
-                            title = "Automático",
-                            subtitle = "OpenGL, el backend probado. Es lo que se usa por defecto.",
-                            selected = renderer == "auto",
-                            items = 3,
-                            index = 0,
-                        ) { renderer = "auto"; settings.renderer = "auto"; showRenderer = false }
-                        ChoiceRow(
-                            icon = Icons.Filled.Memory,
-                            title = "OpenGL",
-                            subtitle = "Fuerza el backend clásico en todas las plataformas.",
-                            selected = renderer == "opengl",
-                            items = 3,
-                            index = 1,
-                        ) { renderer = "opengl"; settings.renderer = "opengl"; showRenderer = false }
-                        ChoiceRow(
-                            icon = Icons.Filled.Memory,
-                            title = gpuBackendLabel(),
-                            subtitle = "Backend nuevo sobre wgpu. Experimental; puede ir más fino en equipos modernos.",
-                            selected = renderer == "vulkan",
-                            items = 3,
-                            index = 2,
-                        ) { renderer = "vulkan"; settings.renderer = "vulkan"; showRenderer = false }
+                        options.forEachIndexed { index, (value, title, subtitle) ->
+                            ChoiceRow(
+                                icon = Icons.Filled.Memory,
+                                title = title,
+                                subtitle = subtitle,
+                                selected = renderer == value,
+                                items = options.size,
+                                index = index,
+                            ) { renderer = value; settings.renderer = value; showRenderer = false }
+                        }
                     }
                 },
                 confirmButton = { TextButton(onClick = { showRenderer = false }) { Text("Cerrar") } },
@@ -3372,6 +3431,34 @@ private fun MaterialSettingsScreen(
 
             MaterialSettingsSection("Apariencia") {
                 MaterialSettingRow(
+                    icon = Icons.Filled.DarkMode,
+                    title = "Modo oscuro",
+                    subtitle = when (darkMode) {
+                        "dark" -> "Siempre oscuro"
+                        "light" -> "Siempre claro"
+                        else -> "Sigue al sistema"
+                    },
+                    trailing = { RadioButton(selected = darkMode == "auto", onClick = null) },
+                    onClick = { onDarkModeChange("auto") },
+                )
+                MaterialSettingDivider()
+                MaterialSettingRow(
+                    icon = Icons.Filled.LightMode,
+                    title = "Modo claro forzado",
+                    subtitle = "Útil si el sistema no informa el tema",
+                    trailing = { RadioButton(selected = darkMode == "light", onClick = null) },
+                    onClick = { onDarkModeChange("light") },
+                )
+                MaterialSettingDivider()
+                MaterialSettingRow(
+                    icon = Icons.Filled.Nightlight,
+                    title = "Modo oscuro forzado",
+                    subtitle = "Negro y azul, como Windows 11",
+                    trailing = { RadioButton(selected = darkMode == "dark", onClick = null) },
+                    onClick = { onDarkModeChange("dark") },
+                )
+                MaterialSettingDivider()
+                MaterialSettingRow(
                     icon = Icons.Filled.Palette,
                     title = "Material You",
                     subtitle = "Colores adaptados al sistema",
@@ -3440,8 +3527,11 @@ private fun MaterialSettingsScreen(
                     icon = Icons.Filled.Memory,
                     title = "Renderizador",
                     subtitle = when (renderer) {
-                        "vulkan" -> "${gpuBackendLabel()} (wgpu), experimental"
                         "opengl" -> "OpenGL, forzado"
+                        "dx12" -> "DirectX 12 (wgpu)"
+                        "vulkan" -> "Vulkan (wgpu)"
+                        "gl" -> "OpenGL por wgpu"
+                        "wgpu" -> "wgpu, automático"
                         else -> "Automático (OpenGL)"
                     },
                     iconContainer = MaterialTheme.colorScheme.secondaryContainer,
@@ -3515,35 +3605,37 @@ private fun MaterialSettingsScreen(
             Spacer(Modifier.height(8.dp))
         }
         if (showRenderer) {
+            val options = if (desktop) {
+                listOf(
+                    Triple("auto", "Automático", "OpenGL, el backend probado. Es lo que se usa por defecto."),
+                    Triple("opengl", "OpenGL", "Fuerza el backend clásico en todas las plataformas."),
+                    Triple("dx12", "DirectX 12", "wgpu sobre Direct3D 12. El más rápido en Windows modernos."),
+                    Triple("vulkan", "Vulkan", "wgpu sobre Vulkan. Buen rendimiento en Windows y Linux."),
+                    Triple("gl", "OpenGL por wgpu", "wgpu sobre OpenGL. Útil si fallan DX12 y Vulkan."),
+                    Triple("wgpu", "wgpu automático", "Deja que wgpu elija la mejor API disponible."),
+                )
+            } else {
+                listOf(
+                    Triple("auto", "Automático", "OpenGL, el backend probado. Es lo que se usa por defecto."),
+                    Triple("opengl", "OpenGL", "Fuerza el backend clásico en todas las plataformas."),
+                    Triple("vulkan", gpuBackendLabel(), "Backend wgpu. Experimental; puede ir más fino en móviles modernos."),
+                )
+            }
             AlertDialog(
                 onDismissRequest = { showRenderer = false },
                 title = { Text("Renderizador") },
                 text = {
                     Column {
-                        ChoiceRow(
-                            icon = Icons.Filled.Memory,
-                            title = "Automático",
-                            subtitle = "OpenGL, el backend probado. Es lo que se usa por defecto.",
-                            selected = renderer == "auto",
-                            items = 3,
-                            index = 0,
-                        ) { renderer = "auto"; settings.renderer = "auto"; showRenderer = false }
-                        ChoiceRow(
-                            icon = Icons.Filled.Memory,
-                            title = "OpenGL",
-                            subtitle = "Fuerza el backend clásico en todas las plataformas.",
-                            selected = renderer == "opengl",
-                            items = 3,
-                            index = 1,
-                        ) { renderer = "opengl"; settings.renderer = "opengl"; showRenderer = false }
-                        ChoiceRow(
-                            icon = Icons.Filled.Memory,
-                            title = gpuBackendLabel(),
-                            subtitle = "Backend nuevo sobre wgpu. Experimental; puede ir más fino en móviles modernos.",
-                            selected = renderer == "vulkan",
-                            items = 3,
-                            index = 2,
-                        ) { renderer = "vulkan"; settings.renderer = "vulkan"; showRenderer = false }
+                        options.forEachIndexed { index, (value, title, subtitle) ->
+                            ChoiceRow(
+                                icon = Icons.Filled.Memory,
+                                title = title,
+                                subtitle = subtitle,
+                                selected = renderer == value,
+                                items = options.size,
+                                index = index,
+                            ) { renderer = value; settings.renderer = value; showRenderer = false }
+                        }
                     }
                 },
                 confirmButton = { TextButton(onClick = { showRenderer = false }) { Text("Cerrar") } },

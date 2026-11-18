@@ -368,7 +368,13 @@ pub(crate) fn debug_info(r: &RendererImpl) -> crate::render::DebugInfo {
         crate::render::DebugInfo {
                 backend: match r.adapter_backend.as_str() {
                         "Vulkan" => "Vulkan".to_string(),
-                        "Gl" => "OpenGL ES".to_string(),
+                        // wgpu llama "Dx12" a Direct3D 12; el overlay lo muestra al jugador y
+                        // "DirectX 12" es el nombre con el que se conoce la API en Windows.
+                        "Dx12" => "DirectX 12".to_string(),
+                        "Dx11" => "DirectX 11".to_string(),
+                        // "Gl" en wgpu es GL/GLES según la plataforma; en escritorio es OpenGL.
+                        "Gl" if cfg!(target_os = "android") => "OpenGL ES".to_string(),
+                        "Gl" => "OpenGL".to_string(),
                         other => other.to_string(),
                 },
                 device: r.adapter_name.clone(),

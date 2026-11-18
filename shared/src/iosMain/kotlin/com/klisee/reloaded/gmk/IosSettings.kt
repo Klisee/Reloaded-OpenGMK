@@ -20,6 +20,13 @@ class IosSettings : SettingsStore {
         get() = string("theme", "liquid")
         set(value) = put("theme", value)
 
+    override var darkMode: String
+        get() = when (string("darkMode", "auto")) {
+            "light", "dark" -> string("darkMode", "auto")
+            else -> "auto"
+        }
+        set(value) = put("darkMode", if (value == "light" || value == "dark") value else "auto")
+
     override var language: String
         get() = string("language", "auto")
         set(value) = put("language", value)

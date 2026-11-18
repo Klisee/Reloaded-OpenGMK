@@ -17,6 +17,13 @@ class AppSettings(private val root: File) : SettingsStore {
         get() = values.getProperty("theme", "material")
         set(value) = put("theme", value)
 
+    override var darkMode: String
+        get() = when (values.getProperty("darkMode", "auto")) {
+            "light", "dark" -> values.getProperty("darkMode", "auto")
+            else -> "auto"
+        }
+        set(value) = put("darkMode", if (value == "light" || value == "dark") value else "auto")
+
     override var language: String
         get() = values.getProperty("language", "auto")
         set(value) = put("language", value)
@@ -53,11 +60,15 @@ class AppSettings(private val root: File) : SettingsStore {
         set(value) = put("showFps", if (value) "1" else "0")
 
     override var renderer: String
-        get() = when (values.getProperty("renderer", "auto")) {
-            "opengl", "vulkan" -> values.getProperty("renderer", "auto")
+        get() = when (val value = values.getProperty("renderer", "auto")) {
+            // "wgpu" deja que wgpu elija la mejor API disponible; los otros tres la fijan.
+            "opengl", "wgpu", "dx12", "vulkan", "gl" -> value
             else -> "auto"
         }
-        set(value) = put("renderer", if (value == "opengl" || value == "vulkan") value else "auto")
+        set(value) = put(
+            "renderer",
+            if (value in setOf("opengl", "wgpu", "dx12", "vulkan", "gl")) value else "auto",
+        )
 
     override var modsEnabled: Boolean
         get() = values.getProperty("modsEnabled", "0") == "1"

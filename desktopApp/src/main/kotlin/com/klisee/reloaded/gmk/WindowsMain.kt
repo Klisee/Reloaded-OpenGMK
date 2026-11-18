@@ -1,5 +1,6 @@
 package com.klisee.reloaded.gmk
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.Shapes
@@ -75,11 +76,13 @@ fun runWindowsApplication(root: File) {
         logo: Painter? = null,
         onLauncherClose: (() -> Unit)? = null,
         onEngineStarted: ((Process) -> Unit)? = null,
+        onDarkModeChanged: ((String) -> Unit)? = null,
     ) {
         val scope = rememberCoroutineScope()
         App(
             repo = repo,
             settings = settings,
+            onDarkModeChanged = onDarkModeChanged,
             onPickZip = { callback ->
                 scope.launch {
                     val file = try {
@@ -151,12 +154,22 @@ fun runWindowsApplication(root: File) {
                             "uncapped" -> detectedHz.toString()
                             else -> "native"
                         }
+                        // El motor entiende dos backends: `gl` (OpenGL histórico) y `wgpu`. Para
+                        // wgpu, `OPENGMK_WGPU_BACKEND` fija la API concreta; sin él, wgpu elige la
+                        // mejor disponible por rendimiento.
                         val backend = when (settings.renderer) {
-                            "vulkan" -> "wgpu"
                             "opengl" -> "gl"
+                            "wgpu", "dx12", "vulkan", "gl" -> "wgpu"
                             else -> null
                         }
-                        writeLog("Video: render=$renderMode showFps=${settings.showFps} backend=${backend ?: "auto"}\n")
+                        val wgpuApi = when (settings.renderer) {
+                            WGPU_BACKEND_DX12, WGPU_BACKEND_VULKAN, WGPU_BACKEND_GL -> settings.renderer
+                            else -> null
+                        }
+                        writeLog(
+                            "Video: render=$renderMode showFps=${settings.showFps} " +
+                                "backend=${backend ?: "auto"} wgpuApi=${wgpuApi ?: "auto"}\n",
+                        )
                         runCatching {
                             val readyMarker = File(root, "engine-ready")
                             readyMarker.delete()
@@ -166,6 +179,7 @@ fun runWindowsApplication(root: File) {
                                 .redirectOutput(ProcessBuilder.Redirect.appendTo(log))
                             builder.environment()["OPENGMK_RENDER"] = renderMode
                             if (backend != null) builder.environment()["OPENGMK_RENDERER"] = backend
+                            if (wgpuApi != null) builder.environment()["OPENGMK_WGPU_BACKEND"] = wgpuApi
                             builder.environment()["OPENGMK_SHOW_FPS"] = if (settings.showFps) "1" else "0"
                             builder.environment()["OPENGMK_SCALING"] = if (settings.keepAspect) "aspect" else "full"
                             builder.environment()["OPENGMK_RENDER_HZ"] = detectedHz.toString()
@@ -273,11 +287,29 @@ fun runWindowsApplication(root: File) {
             }
             if (isWindows()) {
                 val fontResolver = remember { createFontFamilyResolver() }
+                // El modo claro/oscuro es un ajuste de la app. Fluent solo se pinta a sí mismo, así
+                // que la paleta de Material se construye aparte con el modo elegido; el tema nativo
+                // de Windows (barra de título) se ajusta con DwmSetWindowAttribute.
+                var darkModeState by remember { mutableStateOf(settings.darkMode) }
+                val themeSource = if (darkModeState == "auto") {
+                    if (WindowsDarkTitleBar.systemPrefersDark() == true) "sistema (registro)" else "sistema (claro)"
+                } else {
+                    "ajuste"
+                }
+                val dark = when (darkModeState) {
+                    "dark" -> true
+                    "light" -> false
+                    else -> WindowsDarkTitleBar.systemPrefersDark() ?: isSystemInDarkTheme()
+                }
+                LaunchedEffect(dark) {
+                    WindowsDarkTitleBar.logTo(File(root, "app.log"), dark, themeSource)
+                    runCatching { WindowsDarkTitleBar.apply(window, dark) }
+                }
                 CompositionLocalProvider(LocalFontFamilyResolver provides fontResolver) {
                     FluentTheme {
                         DesktopOverlayRoot(visible = launching && !engineReady, logo = appIcon) {
                             AppContent(
-                                colorScheme = FluentTheme.colors.toMaterialScheme(),
+                                colorScheme = FluentTheme.colors.toMaterialScheme(dark),
                                 shapes = Shapes(
                                     extraSmall = RoundedCornerShape(4.dp),
                                     small = RoundedCornerShape(6.dp),
@@ -286,6 +318,7 @@ fun runWindowsApplication(root: File) {
                                     extraLarge = RoundedCornerShape(16.dp),
                                 ),
                                 logo = appIcon,
+                                onDarkModeChanged = { darkModeState = it },
                                 onLauncherClose = { exitApplication() },
                                 onEngineStarted = {
                                     launching = true
@@ -312,8 +345,8 @@ fun runWindowsApplication(root: File) {
 }
 
 @OptIn(ExperimentalFluentApi::class)
-private fun Colors.toMaterialScheme(): ColorScheme {
-    val base = if (darkMode) darkColorScheme() else lightColorScheme()
+private fun Colors.toMaterialScheme(dark: Boolean): ColorScheme {
+    val base = if (dark) darkColorScheme() else lightColorScheme()
     val accent = fillAccent.default
     val onAccent = text.onAccent.primary
     return base.copy(

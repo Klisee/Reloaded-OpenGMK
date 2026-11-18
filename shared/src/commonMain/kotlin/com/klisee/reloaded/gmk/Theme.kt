@@ -38,6 +38,7 @@ private val ReloadedShapes = Shapes(
 @Composable
 fun ReloadedTheme(
     theme: String = "material",
+    darkMode: String = "auto",
     fontFamily: FontFamily = FontFamily.SansSerif,
     colorSchemeOverride: ColorScheme? = null,
     shapesOverride: Shapes? = null,
@@ -64,7 +65,10 @@ fun ReloadedTheme(
         )
     }
     val liquid = theme == "liquid"
-    val dark = when (theme) {
+    // El modo claro/oscuro es un ajuste propio y no depende del estilo visual elegido.
+    // Antes se deducía solo con `isSystemInDarkTheme()`, que en Compose Desktop no lee el tema
+    // de Windows: la app se quedaba siempre en claro y no había forma de cambiarlo.
+    val dark = when (darkMode) {
         "light" -> false
         "dark" -> true
         else -> isSystemInDarkTheme()

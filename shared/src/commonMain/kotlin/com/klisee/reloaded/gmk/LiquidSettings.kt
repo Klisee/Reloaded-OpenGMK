@@ -26,8 +26,11 @@ import androidx.compose.material.icons.filled.CatchingPokemon
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Nightlight
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Speed
@@ -70,6 +73,8 @@ fun LiquidSettingsScreen(
     appVersion: String,
     theme: String,
     onThemeChange: (String) -> Unit,
+    darkMode: String,
+    onDarkModeChange: (String) -> Unit,
     onClose: () -> Unit,
     onLogs: () -> Unit,
     onAbout: () -> Unit,
@@ -244,6 +249,34 @@ fun LiquidSettingsScreen(
             }
 
             LiquidGroup(title = "Apariencia") {
+                LiquidRow(
+                    Icons.Filled.DarkMode,
+                    "Modo oscuro",
+                    when (darkMode) {
+                        "dark" -> "Siempre oscuro"
+                        "light" -> "Siempre claro"
+                        else -> "Sigue al sistema"
+                    },
+                    selected = darkMode == "auto",
+                    onClick = { onDarkModeChange("auto") },
+                )
+                HorizontalDivider(modifier = Modifier.padding(start = 56.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                LiquidRow(
+                    Icons.Filled.LightMode,
+                    "Modo claro forzado",
+                    "Útil si el sistema no informa el tema",
+                    selected = darkMode == "light",
+                    onClick = { onDarkModeChange("light") },
+                )
+                HorizontalDivider(modifier = Modifier.padding(start = 56.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                LiquidRow(
+                    Icons.Filled.Nightlight,
+                    "Modo oscuro forzado",
+                    "Negro y azul, como Windows 11",
+                    selected = darkMode == "dark",
+                    onClick = { onDarkModeChange("dark") },
+                )
+                HorizontalDivider(modifier = Modifier.padding(start = 56.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
                 LiquidRow(
                     Icons.Filled.Palette,
                     "Material You",
