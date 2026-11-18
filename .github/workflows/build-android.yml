@@ -1,10 +1,11 @@
 name: Build Android
 
+# Solo manual: ya no corre en cada push. Android es la plataforma que no se
+# compila en este equipo, asi que sigue disponible desde la pestana Actions
+# cuando haga falta un APK. Las versiones se publican con release.yml y un tag v*.
+
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-  pull_request:
 
 permissions:
   contents: read

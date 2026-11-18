@@ -28,11 +28,22 @@ pero las terminales **ya abiertas no las heredan**. Cargá el entorno:
 ## Compilar todo (motor + instaladores)
 
 ```powershell
-.\tools\build-windows.ps1
+.\tools\build-local.ps1
 ```
 
-Eso hace tres cosas: compila el motor Rust, copia `gm8emulator.exe` a
+Es el camino recomendado para el día a día: **~2-3 min** frente a los ~11 de un
+runner de GitHub, y no hace falta subir nada para probar. Hace las tres cosas:
+compila el motor Rust, copia `gm8emulator.exe` a
 `desktopApp/src/main/resources/` y genera MSI y NSIS.
+
+Opciones:
+
+```powershell
+.\tools\build-local.ps1 -Engine    # sólo el motor
+.\tools\build-local.ps1 -App       # sólo la app (el motor ya está copiado)
+.\tools\build-local.ps1 -Run       # compila y abre la app al terminar
+.\tools\build-local.ps1 -Clean     # limpia artefactos antes
+```
 
 Salida:
 
@@ -40,6 +51,18 @@ Salida:
 desktopApp\build\compose\binaries\main\msi\*.msi
 desktopApp\build\compose\binaries\main\nsis\*.exe
 ```
+
+`tools/build-windows.ps1` sigue existiendo y hace lo mismo sin las opciones; es
+el que se usa desde otros scripts.
+
+## GitHub Actions
+
+Los workflows de compilación **ya no corren en cada push** (sólo manualmente
+desde la pestaña Actions). `release.yml` sí sigue activo con un tag `v*`, que es
+lo que publica la release que consume el autoactualizador.
+
+Si tocás algo que no podés compilar en este equipo (Android), lanzá su workflow
+a mano desde Actions.
 
 ## Sólo el motor
 

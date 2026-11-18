@@ -1,10 +1,12 @@
 name: Build Windows
 
+# Solo manual. El build de Windows se hace en local con tools/build-windows.ps1
+# (~2 min frente a los ~11 de un runner, y permite iterar sin esperar al push).
+# Para publicar una version completa sigue estando release.yml, que se dispara
+# con un tag v*.
+
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-  pull_request:
 
 permissions:
   contents: read

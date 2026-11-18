@@ -1,10 +1,11 @@
 name: Build Linux
 
+# Solo manual: se conserva para comprobar de vez en cuando que el proyecto sigue
+# compilando en Linux, pero ya no corre en cada push. Las versiones se publican
+# con release.yml y un tag v*.
+
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-  pull_request:
 
 permissions:
   contents: read
