@@ -140,6 +140,13 @@ expect fun platformLabel(): String
 /// Etiqueta de la API que usa el backend wgpu, para mostrar en ajustes.
 expect fun gpuBackendLabel(): String
 
+/// Si el sistema está en modo oscuro.
+///
+/// `isSystemInDarkTheme()` de Compose no lee el tema de Windows en escritorio: devuelve siempre
+/// claro. Esta función lo consulta de la forma nativa de cada plataforma y devuelve `null` cuando
+/// no se puede saber, para que el llamador decida.
+expect fun systemPrefersDark(): Boolean?
+
 /// Nombre de la API de wgpu que se le pasa al motor en `OPENGMK_WGPU_BACKEND`.
 ///
 /// El motor acepta `dx12`, `vulkan` y `gl`. Se expone como constante para que la pantalla de

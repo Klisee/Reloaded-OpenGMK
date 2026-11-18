@@ -66,12 +66,13 @@ fun ReloadedTheme(
     }
     val liquid = theme == "liquid"
     // El modo claro/oscuro es un ajuste propio y no depende del estilo visual elegido.
-    // Antes se deducía solo con `isSystemInDarkTheme()`, que en Compose Desktop no lee el tema
-    // de Windows: la app se quedaba siempre en claro y no había forma de cambiarlo.
+    // El orden importa: "auto" consulta primero la detección nativa de la plataforma, porque
+    // `isSystemInDarkTheme()` de Compose no lee el tema de Windows en escritorio y devuelve
+    // siempre claro. Solo si la plataforma no sabe (null) se usa el de Compose.
     val dark = when (darkMode) {
         "light" -> false
         "dark" -> true
-        else -> isSystemInDarkTheme()
+        else -> systemPrefersDark() ?: isSystemInDarkTheme()
     }
     val scheme = colorSchemeOverride ?: if (liquid) liquidGlassScheme(dark) else platformColorScheme(dark)
     CompositionLocalProvider(LocalLiquidGlass provides liquid) {

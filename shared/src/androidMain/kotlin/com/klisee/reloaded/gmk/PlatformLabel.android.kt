@@ -16,3 +16,9 @@ actual fun platformLabel(): String {
 }
 
 actual fun gpuBackendLabel(): String = "Vulkan"
+
+/**
+ * En Android el tema lo resuelve `isSystemInDarkTheme()` de Compose, que sí funciona; se devuelve
+ * `null` para que el llamador use esa vía en vez de duplicar la lógica.
+ */
+actual fun systemPrefersDark(): Boolean? = null

@@ -63,6 +63,9 @@ actual fun platformLabel(): String = "iOS"
 
 actual fun gpuBackendLabel(): String = "Metal"
 
+/// iOS resuelve el tema oscuro con `isSystemInDarkTheme()` de Compose; `null` para usar esa vía.
+actual fun systemPrefersDark(): Boolean? = null
+
 actual fun systemLanguage(): String = "es"
 
 

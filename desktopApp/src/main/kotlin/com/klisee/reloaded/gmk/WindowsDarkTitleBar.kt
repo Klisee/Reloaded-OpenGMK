@@ -1,17 +1,23 @@
 package com.klisee.reloaded.gmk
 
+import com.sun.jna.Native
+import com.sun.jna.Pointer
+import com.sun.jna.platform.win32.User32
+import com.sun.jna.platform.win32.WinDef.HWND
+import com.sun.jna.platform.win32.WinUser
+import com.sun.jna.ptr.IntByReference
 import java.awt.Window
 import java.io.File
 
 /**
- * Tema de Windows para la ventana del launcher.
+ * Aplica el tema oscuro de Windows a la ventana del launcher.
  *
  * Compose Desktop dibuja su interfaz, pero la barra de título y el borde los pinta Windows: sin
  * avisar, quedan en blanco aunque la app sea oscura.
  *
- * No se añaden dependencias. Se usa reflexión sobre `com.sun.jna` **solo si está en el runtime**
- * (viene de forma transitiva con Compose Desktop en el paquete final, pero no está en el
- * classpath de compilación). Si no está, la app funciona igual: solo no se pinta la barra.
+ * El HWND se localiza por PID con `EnumWindows`. Antes se intentaba por reflexión sobre
+ * `getPeer()` de AWT, que es protegido y devuelve null: el handle nunca se obtenía y la barra se
+ * quedaba blanca. Se usa `jna-platform`, que ya viene con Compose Desktop.
  */
 internal object WindowsDarkTitleBar {
 
@@ -19,6 +25,12 @@ internal object WindowsDarkTitleBar {
     private const val DWMWA_USE_IMMERSIVE_DARK_MODE_OLD = 19
     private const val DWMWA_CAPTION_COLOR = 35
     private const val DWMWA_BORDER_COLOR = 34
+
+    private val dwmapi by lazy { Native.load("dwmapi", DwmApi::class.java) }
+
+    private interface DwmApi : com.sun.jna.Library {
+        fun DwmSetWindowAttribute(hwnd: HWND, attribute: Int, value: Pointer, size: Int): Int
+    }
 
     fun isWindows(): Boolean =
         System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true)
@@ -32,8 +44,8 @@ internal object WindowsDarkTitleBar {
      * Lee el tema de Windows del registro.
      *
      * `isSystemInDarkTheme()` de Compose Desktop no lee el tema de Windows, así que la app siempre
-     * arrancaba en claro. `AppsUseLightTheme` es el valor que usa Windows 11 para decidir si las
-     * aplicaciones se dibujan en claro u oscuro. Devuelve `null` si no se puede leer.
+     * arrancaba en claro. `AppsUseLightTheme` decide si las aplicaciones se dibujan en claro u
+     * oscuro. Devuelve `null` si no se puede leer.
      */
     fun systemPrefersDark(): Boolean? = runCatching {
         val process = ProcessBuilder(
@@ -43,7 +55,8 @@ internal object WindowsDarkTitleBar {
         ).redirectErrorStream(true).start()
         val text = process.inputStream.bufferedReader().readText()
         process.waitFor()
-        val match = Regex("""AppsUseLightTheme\s+REG_DWORD\s+0x([0-9a-fA-F]+)""").find(text) ?: return null
+        val match = Regex("""AppsUseLightTheme\s+REG_DWORD\s+0x([0-9a-fA-F]+)""").find(text)
+            ?: return null
         match.groupValues[1].toInt(16) == 0
     }.getOrNull()
 
@@ -55,53 +68,56 @@ internal object WindowsDarkTitleBar {
     }.getOrDefault(0)
 
     /**
-     * Pinta la barra de título en oscuro. Debe llamarse cuando la ventana ya es *displayable*
-     * (después de que Compose la muestre).
+     * HWND visible de nivel superior del proceso actual.
+     *
+     * `EnumWindows` recorre las ventanas del escritorio y `GetWindowThreadProcessId` dice a qué
+     * proceso pertenece cada una. Se toma la primera visible del propio proceso.
      */
-    fun apply(window: Window, dark: Boolean) {
-        if (!isWindows()) return
-        runCatching {
-            val hwnd = hwndOf(window) ?: return
-            setIntAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, if (dark) 1 else 0) ||
-                setIntAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, if (dark) 1 else 0)
-            if (isWindows11 && dark) {
-                setIntAttribute(hwnd, DWMWA_CAPTION_COLOR, 0x00202020)
-                setIntAttribute(hwnd, DWMWA_BORDER_COLOR, 0x003D3D3D)
+    private fun windowHandle(): Long? = runCatching {
+        val pid = ProcessHandle.current().pid().toInt()
+        var found: Long = 0
+
+        val callback = object : WinUser.WNDENUMPROC {
+            override fun callback(hwnd: HWND?, data: Pointer?): Boolean {
+                if (found != 0L || hwnd == null) return true
+                val owner = IntByReference()
+                User32.INSTANCE.GetWindowThreadProcessId(hwnd, owner)
+                if (owner.value == pid && User32.INSTANCE.IsWindowVisible(hwnd)) {
+                    found = Pointer.nativeValue(hwnd.pointer)
+                }
+                return true
             }
         }
-    }
-
-    private fun hwndOf(window: Window): Long? = runCatching {
-        val peer = window.javaClass.getMethod("getPeer").invoke(window) ?: return null
-        val hwnd = peer.javaClass.getMethod("getHWnd").invoke(peer) as Long
-        if (hwnd == 0L) null else hwnd
+        User32.INSTANCE.EnumWindows(callback, null)
+        if (found == 0L) null else found
     }.getOrNull()
 
-    /**
-     * Llama a `DwmSetWindowAttribute` por reflexión. Devuelve `true` si la llamada tuvo éxito.
-     *
-     * La firma nativa es `(HWND, DWORD, LPCVOID, DWORD)`. Con JNA se puede invocar sin declarar
-     * nada más; el `int[]` del valor viaja como puntero.
-     */
-    private fun setIntAttribute(hwnd: Long, attribute: Int, value: Int): Boolean = runCatching {
-        val native = Class.forName("com.sun.jna.Native")
-        val nativeLibrary = Class.forName("com.sun.jna.NativeLibrary")
-        val dwmapi = nativeLibrary.getMethod("getInstance", String::class.java).invoke(null, "dwmapi")
-        val function = nativeLibrary.getMethod("getFunction", String::class.java)
-            .invoke(dwmapi, "DwmSetWindowAttribute")
-        val invokeInt = function!!.javaClass.getMethod(
-            "invokeInt",
-            Array<Any>::class.java,
-        )
-        val args = arrayOf<Any>(hwnd, attribute, intArrayOf(value), 4)
-        invokeInt.invoke(function, args) as Int == 0
-    }.getOrDefault(false)
+    /** Aplica el modo oscuro a la barra de título. Devuelve si DWM aceptó el atributo. */
+    fun applyAndLog(window: Window, dark: Boolean): Boolean {
+        if (!isWindows()) return false
+        val handle = windowHandle() ?: return false
+        val hwnd = HWND(Pointer(handle))
+        val value = IntByReference(if (dark) 1 else 0)
 
-    /// Escribe un diagnóstico en el log. Sirve para saber si el sistema aplicó el tema o no.
-    fun logTo(file: File, dark: Boolean, source: String) {
+        val ok = dwmapi.DwmSetWindowAttribute(
+            hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, value.pointer, 4,
+        ) == 0 || dwmapi.DwmSetWindowAttribute(
+            hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, value.pointer, 4,
+        ) == 0
+
+        if (ok && isWindows11 && dark) {
+            val caption = IntByReference(0x00202020)
+            dwmapi.DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, caption.pointer, 4)
+            val border = IntByReference(0x003D3D3D)
+            dwmapi.DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, border.pointer, 4)
+        }
+        return ok
+    }
+
+    fun logTo(file: File, text: String) {
         runCatching {
             file.parentFile?.mkdirs()
-            file.appendText("Tema de ventana: dark=$dark ($source) windows11=$isWindows11\n")
+            file.appendText(text)
         }
     }
 }

@@ -287,9 +287,13 @@ fun runWindowsApplication(root: File) {
             }
             if (isWindows()) {
                 val fontResolver = remember { createFontFamilyResolver() }
-                // El modo claro/oscuro es un ajuste de la app. Fluent solo se pinta a sí mismo, así
-                // que la paleta de Material se construye aparte con el modo elegido; el tema nativo
-                // de Windows (barra de título) se ajusta con DwmSetWindowAttribute.
+                // El modo claro/oscuro es un ajuste de la app. Antes se pasaba
+                // `FluentTheme.colors.toMaterialScheme()` como override, y eso anulaba toda la
+                // paleta: `FluentTheme` detecta el tema con la misma función de Compose Desktop
+                // que no lee el tema de Windows, así que devolvía siempre colores claros y la
+                // interfaz se quedaba en blanco aunque el ajuste dijera oscuro. Ahora la paleta
+                // la construye `ReloadedTheme` a partir de `darkMode` (PlatformTheme.desktop.kt) y
+                // Fluent solo aporta sus CompositionLocals para la selección de texto.
                 var darkModeState by remember { mutableStateOf(settings.darkMode) }
                 val themeSource = if (darkModeState == "auto") {
                     if (WindowsDarkTitleBar.systemPrefersDark() == true) "sistema (registro)" else "sistema (claro)"
@@ -302,14 +306,26 @@ fun runWindowsApplication(root: File) {
                     else -> WindowsDarkTitleBar.systemPrefersDark() ?: isSystemInDarkTheme()
                 }
                 LaunchedEffect(dark) {
-                    WindowsDarkTitleBar.logTo(File(root, "app.log"), dark, themeSource)
-                    runCatching { WindowsDarkTitleBar.apply(window, dark) }
+                    val logFile = File(root, "app.log")
+                    WindowsDarkTitleBar.logTo(
+                        logFile,
+                        "Tema de ventana: dark=$dark ($themeSource) windows11=${WindowsDarkTitleBar.isWindows11}\n",
+                    )
+                    // La ventana tarda en existir: se reintenta hasta ~3 s. Antes se intentaba una
+                    // sola vez con un HWND que nunca se obtenía, y la barra quedaba blanca.
+                    repeat(30) { attempt ->
+                        if (WindowsDarkTitleBar.applyAndLog(window, dark)) {
+                            WindowsDarkTitleBar.logTo(logFile, "Barra de titulo: aplicada en el intento ${attempt + 1}\n")
+                            return@LaunchedEffect
+                        }
+                        kotlinx.coroutines.delay(100)
+                    }
+                    WindowsDarkTitleBar.logTo(logFile, "Barra de titulo: no se pudo aplicar\n")
                 }
                 CompositionLocalProvider(LocalFontFamilyResolver provides fontResolver) {
                     FluentTheme {
                         DesktopOverlayRoot(visible = launching && !engineReady, logo = appIcon) {
                             AppContent(
-                                colorScheme = FluentTheme.colors.toMaterialScheme(dark),
                                 shapes = Shapes(
                                     extraSmall = RoundedCornerShape(4.dp),
                                     small = RoundedCornerShape(6.dp),
@@ -346,6 +362,9 @@ fun runWindowsApplication(root: File) {
 
 @OptIn(ExperimentalFluentApi::class)
 private fun Colors.toMaterialScheme(dark: Boolean): ColorScheme {
+    // Sin uso desde que la paleta la construye ReloadedTheme. Se conserva por si se quiere volver a
+    // derivar del tema de Fluent, pero ojo: Fluent detecta el tema con isSystemInDarkTheme(), que en
+    // escritorio devuelve siempre claro, así que sus colores no sirven para el modo oscuro.
     val base = if (dark) darkColorScheme() else lightColorScheme()
     val accent = fillAccent.default
     val onAccent = text.onAccent.primary

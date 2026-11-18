@@ -14,6 +14,10 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.10.2")
     implementation("dev.nucleusframework.composefluent:fluent:1.0.0")
     implementation("io.github.vinceglb:filekit-dialogs:0.17.0")
+    // Llega de forma transitiva con Compose Desktop, pero hace falta declararlo para poder
+    // compilar contra el: WindowsDarkTitleBar lo usa para pintar la barra de titulo con DWM.
+    implementation("net.java.dev.jna:jna:5.19.1")
+    implementation("net.java.dev.jna:jna-platform:5.19.1")
 }
 
 nucleus.application {
