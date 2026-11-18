@@ -2,6 +2,7 @@ plugins {
     id("org.jetbrains.kotlin.multiplatform")
     id("com.android.kotlin.multiplatform.library")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization")
     id("org.jetbrains.compose")
 }
 
@@ -16,6 +17,9 @@ kotlin {
         namespace = "com.klisee.reloaded.gmk.shared"
         compileSdk = 37
         minSdk = 26
+
+        // Los tests de host son los que cubren la regla de firmas del actualizador de Android.
+        withHostTest {}
     }
 
     jvm("desktop")
@@ -62,6 +66,14 @@ kotlin {
         }
         getByName("iosArm64Main").dependsOn(iosMain)
         getByName("iosSimulatorArm64Main").dependsOn(iosMain)
+
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+        }
+
+        getByName("androidHostTest").dependencies {
+            implementation(kotlin("test"))
+        }
 
         commonMain.dependencies {
             implementation("org.jetbrains.androidx.lifecycle:lifecycle-runtime-compose:2.9.1")

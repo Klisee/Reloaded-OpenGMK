@@ -1,0 +1,254 @@
+name: Release
+
+# Publica una release con los instaladores que consume el autoactualizador.
+#
+# El nombre de cada asset NO es libre: `UpdatePlatform` en
+# shared/src/commonMain/.../update/UpdateRelease.kt construye el nombre a partir de la versión, y el
+# launcher busca exactamente ese archivo. Si cambia aquí, hay que cambiarlo allí.
+#
+#   reloaded-opengmk-<version>-win-x64.msi
+#   reloaded-opengmk_<version>_amd64.deb
+#   reloaded-opengmk-<version>-linux-x86_64.AppImage
+#   reloaded-opengmk-<version>-android-arm64.apk
+#
+# El launcher no se ata al nombre exacto: reconoce el paquete por su extensión y, si hace falta,
+# por la versión dentro del nombre. Así una release sigue siendo válida aunque el empaquetador
+# (jpackage/Nucleus) decida llamar al archivo de otra forma.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag a publicar (por ejemplo v0.6.7)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    name: Resolver versión
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Resolver
+        id: resolve
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_TAG:-}" ]; then
+            TAG="$INPUT_TAG"
+          elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="$GITHUB_REF_NAME"
+          else
+            echo "Sin tag: usa workflow_dispatch con el campo tag." >&2
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'; then
+            echo "La versión '$VERSION' no tiene el formato 0.6.7" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  android:
+    name: Android arm64
+    needs: version
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      NDK_VERSION: "27.2.12479018"
+      ANDROID_PLATFORM: "29"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: SDK y NDK
+        run: |
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-37.0" "build-tools;37.0.0" "ndk;${NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+      - name: Rust y cargo-ndk
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          rustup target add --toolchain 1.99.0 aarch64-linux-android
+          cargo +1.99.0 install cargo-ndk --version 3.5.4 --locked
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine/src/OpenGMK
+      - name: Motor nativo
+        working-directory: engine/src/OpenGMK
+        run: cargo +1.99.0 ndk -t arm64-v8a --platform "${ANDROID_PLATFORM}" build -p gm8emulator --release --features backend-wgpu
+      - name: Copiar biblioteca nativa
+        run: |
+          install -D -m 0644 \
+            engine/src/OpenGMK/target/aarch64-linux-android/release/libgm8emulator.so \
+            androidApp/src/main/jniLibs/arm64-v8a/libgm8emulator.so
+      - name: Restaurar keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_BASE64:-}" ]; then
+            echo "::warning::Sin ANDROID_KEYSTORE_BASE64, el APK se firmara con debug."
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/keystore"
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/keystore/release.jks"
+          {
+            echo "storeFile=$RUNNER_TEMP/keystore/release.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > androidApp/keystore.properties
+          chmod 600 androidApp/keystore.properties
+      - name: APK
+        run: ./gradlew --no-daemon :androidApp:assembleRelease
+      - name: Renombrar con el nombre que espera el actualizador
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          mkdir -p dist
+          APK=$(find androidApp/build/outputs/apk/release -name '*.apk' | head -1)
+          test -n "$APK"
+          cp "$APK" "dist/reloaded-opengmk-${VERSION}-android-arm64.apk"
+          ls -la dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-android
+          if-no-files-found: error
+          path: dist/*.apk
+
+  linux:
+    name: Linux x86_64
+    needs: version
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.99.0
+      - name: Dependencias del sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libasound2-dev libpulse-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
+            libxcb1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-render0-dev \
+            libgl1-mesa-dev libegl1-mesa-dev libudev-dev libfontconfig1-dev \
+            fuse libfuse2
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine/src/OpenGMK
+      - name: Motor
+        run: |
+          cargo build --manifest-path engine/src/OpenGMK/Cargo.toml --release -p gm8emulator --features backend-wgpu
+          install -m 0755 engine/src/OpenGMK/target/release/gm8emulator \
+            desktopApp/src/main/resources/gm8emulator
+      - name: Empaquetar
+        run: |
+          ./gradlew --no-daemon :desktopApp:packageDeb :desktopApp:packageAppImage
+      - name: Renombrar con el nombre que espera el actualizador
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          DEB=$(find desktopApp/build/compose/binaries/main/deb -name '*.deb' | head -1)
+          test -n "$DEB"
+          cp "$DEB" "dist/reloaded-opengmk_${VERSION}_amd64.deb"
+          APPIMAGE=$(find desktopApp/build/compose/binaries/main/appimage -name '*.AppImage' | head -1)
+          test -n "$APPIMAGE"
+          cp "$APPIMAGE" "dist/reloaded-opengmk-${VERSION}-linux-x86_64.AppImage"
+          chmod +x dist/*.AppImage
+          ls -la dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          if-no-files-found: error
+          path: dist/*
+
+  windows:
+    name: Windows x64
+    needs: version
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine/src/OpenGMK
+      - name: Motor
+        shell: pwsh
+        run: |
+          cargo build --manifest-path engine/src/OpenGMK/Cargo.toml --release -p gm8emulator --features backend-wgpu
+          Copy-Item engine/src/OpenGMK/target/release/gm8emulator.exe desktopApp/src/main/resources/gm8emulator.exe -Force
+      - name: Empaquetar
+        shell: pwsh
+        run: .\gradlew.bat --no-daemon :desktopApp:packageMsi
+      - name: Renombrar con el nombre que espera el actualizador
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $msi = Get-ChildItem -Recurse desktopApp/build/compose/binaries/main/msi -Filter *.msi | Select-Object -First 1
+          if (-not $msi) { throw "no se genero el MSI" }
+          Copy-Item $msi.FullName "dist/reloaded-opengmk-$env:VERSION-win-x64.msi"
+          Get-ChildItem dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          if-no-files-found: error
+          path: dist/*.msi
+
+  publish:
+    name: Publicar
+    needs: [version, android, linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Listar
+        run: ls -la assets
+      - name: Crear o actualizar la release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: "Reloaded OpenGMK ${{ needs.version.outputs.version }}"
+          draft: false
+          # Una versión con guion (0.7.0-beta1) se marca como preestreno, y el canal estable no la
+          # ofrece. Así el canal beta puede probarla sin afectar a todo el mundo.
+          prerelease: ${{ contains(needs.version.outputs.version, '-') }}
+          generate_release_notes: true
+          files: assets/*

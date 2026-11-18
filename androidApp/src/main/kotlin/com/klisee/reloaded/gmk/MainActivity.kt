@@ -49,6 +49,25 @@ class MainActivity : ComponentActivity() {
             val repo = remember { JvmGameStore(gameRepository) }
             val settings = remember { AppSettings(filesDir) }
             val onlineEngine = remember { JvmOnlineEngineStore(gameRepository.gameDir) }
+            val appVersion = remember {
+                runCatching { packageManager.getPackageInfo(packageName, 0).versionName }
+                    .getOrNull().orEmpty().ifEmpty { "0.5.0-dev" }
+            }
+            val updateManager = remember {
+                com.klisee.reloaded.gmk.update.UpdateManager(
+                    bridge = com.klisee.reloaded.gmk.update.AndroidUpdateBridge(applicationContext, appVersion),
+                    settings = com.klisee.reloaded.gmk.update.FileUpdateSettings(filesDir),
+                    userAgent = "Reloaded-OpenGMK/$appVersion",
+                ).apply {
+                    // Aviso del sistema cuando el chequeo automático ve algo nuevo.
+                    onUpdateFound = { release ->
+                        com.klisee.reloaded.gmk.update.AndroidUpdateNotifier.notifyAvailable(
+                            applicationContext,
+                            release.version,
+                        )
+                    }
+                }
+            }
             var pending by remember { mutableStateOf<((PickedFile?) -> Unit)?>(null) }
             var pendingImage by remember { mutableStateOf<((PickedFile?) -> Unit)?>(null) }
             var pendingSave by remember { mutableStateOf<Pair<String, ByteArray>?>(null) }
@@ -56,6 +75,9 @@ class MainActivity : ComponentActivity() {
                 mutableStateOf(checkSelfPermission(Manifest.permission.INTERNET) == PackageManager.PERMISSION_GRANTED)
             }
             val requestNetwork = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { network = it }
+            val notificationsPermission = rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestPermission(),
+            ) { }
             val scope = rememberCoroutineScope()
             val saveFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
                 val data = pendingSave
@@ -112,6 +134,12 @@ class MainActivity : ComponentActivity() {
             }
             LaunchedEffect(Unit) {
                 if (!network) requestNetwork.launch(Manifest.permission.INTERNET)
+                // Android 13+ pide permiso explícito para notificar; sin él no habría aviso de updates.
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
+                    checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                ) {
+                    notificationsPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
                 repo.prepare()
                 EngineConfig.copyAssets(filesDir, assets)
             }
@@ -173,11 +201,10 @@ class MainActivity : ComponentActivity() {
                 supportedAbis = android.os.Build.SUPPORTED_ABIS.toList(),
                 connectedPads = connectedPads(),
                 refreshRate = runCatching { windowManager.defaultDisplay.refreshRate }.getOrDefault(60f),
-                appVersion = runCatching {
-                    packageManager.getPackageInfo(packageName, 0).versionName
-                }.getOrNull().orEmpty().ifEmpty { "0.5.0-dev" },
+                appVersion = appVersion,
                 logo = painterResource(R.drawable.reloaded_logo),
                 onlineEngine = onlineEngine,
+                updateManager = updateManager,
             )
         }
     }

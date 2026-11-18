@@ -49,6 +49,12 @@ private fun isWindows(): Boolean =
 
 @OptIn(ExperimentalFluentApi::class)
 fun runWindowsApplication(root: File) {
+    val appVersion = "0.6.7"
+    val updateManager = com.klisee.reloaded.gmk.update.UpdateManager(
+        bridge = com.klisee.reloaded.gmk.update.DesktopUpdateBridge(root, appVersion),
+        settings = com.klisee.reloaded.gmk.update.FileUpdateSettings(root),
+        userAgent = "Reloaded-OpenGMK/$appVersion",
+    )
     val jvmRepo = GameRepository(root)
     val repo = JvmGameStore(jvmRepo)
     val settings = AppSettings(root)
@@ -192,7 +198,8 @@ fun runWindowsApplication(root: File) {
                 java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment()
                     .defaultScreenDevice.displayMode.refreshRate.toFloat()
             }.getOrDefault(60f),
-            appVersion = "0.6.7",
+            appVersion = appVersion,
+            updateManager = updateManager,
             fontFamily = fontFamily,
             colorScheme = colorScheme,
             shapes = shapes,
@@ -237,7 +244,16 @@ fun runWindowsApplication(root: File) {
                                 marker.delete()
                                 engineReady = true
                                 // El motor ya tiene píxeles en pantalla: nos apartamos de su camino.
-                                runCatching { window.toBack() }
+                                // En Windows `toBack` no aparta una ventana maximizada (el WM la
+                                // vuelve a traer al frente), así que ahí se minimiza; en Wayland
+                                // minimizar es lo que no es fiable, y `toBack` sí funciona.
+                                runCatching {
+                                    if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
+                                        window.extendedState = window.extendedState or java.awt.Frame.ICONIFIED
+                                    } else {
+                                        window.toBack()
+                                    }
+                                }
                             }
                         }
                         kotlinx.coroutines.delay(120)
@@ -247,6 +263,9 @@ fun runWindowsApplication(root: File) {
                     engineReady = false
                     launching = false
                     runCatching {
+                        if (window.extendedState and java.awt.Frame.ICONIFIED != 0) {
+                            window.extendedState = window.extendedState and java.awt.Frame.ICONIFIED.inv()
+                        }
                         window.toFront()
                         window.requestFocus()
                     }

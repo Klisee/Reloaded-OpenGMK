@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VideogameAsset
 import androidx.compose.material3.AlertDialog
@@ -77,6 +78,7 @@ fun LiquidSettingsScreen(
     onTouch: () -> Unit,
     onControls: () -> Unit,
     onFps: () -> Unit,
+    onUpdates: (() -> Unit)? = null,
     onChanged: () -> Unit,
 ) {
     var status by remember(revision) { mutableStateOf(repo.status()) }
@@ -260,6 +262,15 @@ fun LiquidSettingsScreen(
             }
 
             LiquidGroup(title = "Ayuda") {
+                if (onUpdates != null) {
+                    LiquidRow(
+                        Icons.Filled.SystemUpdate,
+                        "Actualizaciones",
+                        "Busca, descarga e instala versiones nuevas",
+                        onClick = onUpdates,
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(start = 56.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                }
                 LiquidRow(Icons.Filled.Article, "Logs", "Comparte los logs si algo falla", onClick = onLogs)
                 HorizontalDivider(modifier = Modifier.padding(start = 56.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
                 LiquidRow(Icons.Filled.Info, "Acerca de", "Versión, créditos y aviso", onClick = onAbout)

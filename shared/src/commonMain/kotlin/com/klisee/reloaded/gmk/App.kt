@@ -153,7 +153,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
-private enum class Pushed { About, Saves, Mods, Online, Touch, TouchEditor, TouchAppearance, TouchAssets, Fps, Controls }
+private enum class Pushed { About, Saves, Mods, Online, Touch, TouchEditor, TouchAppearance, TouchAssets, Fps, Controls, Updates }
 
 @Composable
 fun App(
@@ -177,6 +177,7 @@ fun App(
     desktopUi: Boolean = false,
     logo: Painter? = null,
     onlineEngine: OnlineEngineStore? = null,
+    updateManager: com.klisee.reloaded.gmk.update.UpdateManager? = null,
 ) {
     var theme by remember { mutableStateOf(settings.theme) }
     val backdrop = rememberReloadedBackdrop()
@@ -228,6 +229,13 @@ fun App(
                 delay(4000)
                 launching = false
             }
+        }
+
+        // Comprobación silenciosa al abrir: como mucho una vez por hora, y si falla no molesta.
+        LaunchedEffect(updateManager) {
+            val manager = updateManager ?: return@LaunchedEffect
+            if (!manager.updateSettings.autoCheck) return@LaunchedEffect
+            runCatching { manager.check(automatic = true) }
         }
 
         if (!onboarded) {
@@ -282,6 +290,14 @@ fun App(
                 )
                 Pushed.Fps -> FpsScreen(settings = settings, refreshRate = refreshRate, onBack = { pushed = null })
                 Pushed.Controls -> ControlsScreen(settings = settings, pads = connectedPads, onBack = { pushed = null })
+                Pushed.Updates -> if (updateManager != null) {
+                    com.klisee.reloaded.gmk.update.UpdatesScreen(
+                        manager = updateManager,
+                        settings = updateManager.updateSettings,
+                        onBack = { pushed = null },
+                        onOpenUrl = onOpenUrl,
+                    )
+                }
             }
         } else {
 
@@ -337,6 +353,7 @@ fun App(
                     onTouch = { pushed = Pushed.Touch },
                     onControls = { pushed = Pushed.Controls },
                     onFps = { pushed = Pushed.Fps },
+                    onUpdates = if (updateManager != null) ({ pushed = Pushed.Updates }) else null,
                     appVersion = appVersion,
                     theme = theme,
                     onThemeChange = {
@@ -1417,6 +1434,7 @@ private fun HomeScreen(
     onRequestNetwork: () -> Unit,
     logo: Painter? = null,
     onlineEngine: OnlineEngineStore? = null,
+    updateManager: com.klisee.reloaded.gmk.update.UpdateManager? = null,
 ) {
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
@@ -2713,6 +2731,7 @@ private fun SettingsScreen(
     onTouch: () -> Unit,
     onControls: () -> Unit,
     onFps: () -> Unit,
+    onUpdates: (() -> Unit)? = null,
     appVersion: String,
     theme: String,
     onThemeChange: (String) -> Unit,
@@ -2737,6 +2756,7 @@ private fun SettingsScreen(
             onTouch = onTouch,
             onControls = onControls,
             onFps = onFps,
+            onUpdates = onUpdates,
             onChanged = onChanged,
         )
     } else {
@@ -2752,6 +2772,7 @@ private fun SettingsScreen(
             onTouch = onTouch,
             onControls = onControls,
             onFps = onFps,
+            onUpdates = onUpdates,
             appVersion = appVersion,
             theme = theme,
             onThemeChange = onThemeChange,
@@ -2850,6 +2871,7 @@ private fun MaterialSettingsScreen(
     onTouch: () -> Unit,
     onControls: () -> Unit,
     onFps: () -> Unit,
+    onUpdates: (() -> Unit)? = null,
     appVersion: String,
     theme: String,
     onThemeChange: (String) -> Unit,
@@ -3165,16 +3187,13 @@ private fun MaterialSettingsScreen(
                                     PcSettingRow(
                                         Icons.Filled.SystemUpdate,
                                         "Versión de la app: $appVersion",
-                                        if (checkingUpdate) "Buscando actualizaciones…" else "Buscar actualizaciones disponibles",
+                                        "Actualizaciones: busca, descarga e instala",
                                         onClick = {
-                                            if (!checkingUpdate) {
-                                                checkingUpdate = true
-                                                scope.launch {
-                                                    val found = checkForUpdate(appVersion, supportedAbis).getOrNull()
-                                                    checkingUpdate = false
-                                                    if (found != null) updateFound = found
-                                                    else snackbar.showSnackbar("Ya tienes la última versión ($appVersion).")
-                                                }
+                                            if (onUpdates != null) onUpdates()
+                                            else scope.launch {
+                                                val found = checkForUpdate(appVersion, supportedAbis).getOrNull()
+                                                if (found != null) updateFound = found
+                                                else snackbar.showSnackbar("Ya tienes la última versión ($appVersion).")
                                             }
                                         },
                                     )
@@ -3462,13 +3481,12 @@ private fun MaterialSettingsScreen(
                 MaterialSettingRow(
                     icon = Icons.Filled.SystemUpdate,
                     title = "Versión de la app: $appVersion",
-                    subtitle = if (checkingUpdate) "Buscando actualizaciones…" else "Buscar actualizaciones disponibles",
-                    enabled = !checkingUpdate,
+                    subtitle = "Actualizaciones: busca, descarga e instala",
+                    enabled = true,
                     onClick = {
-                        checkingUpdate = true
-                        scope.launch {
+                        if (onUpdates != null) onUpdates()
+                        else scope.launch {
                             val found = checkForUpdate(appVersion, supportedAbis).getOrNull()
-                            checkingUpdate = false
                             if (found != null) updateFound = found
                             else snackbar.showSnackbar("Ya tienes la última versión ($appVersion).")
                         }
