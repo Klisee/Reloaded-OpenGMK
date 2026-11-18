@@ -11,6 +11,38 @@ val keystoreProperties = Properties().apply {
     if (keystorePropertiesFile.isFile) keystorePropertiesFile.inputStream().use { load(it) }
 }
 
+// Un APK por ABI con -PtargetAbi=<abi>. Por defecto solo arm64-v8a, que es lo
+// que release.yml espera (un unico APK con la lib arm64); universal empaqueta
+// las tres y se pide explicitamente:
+//   ./gradlew :androidApp:assembleRelease                         (arm64-v8a)
+//   ./gradlew :androidApp:assembleRelease -PtargetAbi=armeabi-v7a
+//   ./gradlew :androidApp:assembleRelease -PtargetAbi=x86_64
+//   ./gradlew :androidApp:assembleRelease -PtargetAbi=universal
+// El motor de cada ABI debe estar ya en src/main/jniLibs/<abi>/libgm8emulator.so;
+// build-android.yml lo compila con cargo-ndk antes de llamar a Gradle.
+// No se usan splits abi: release.yml espera un unico APK en outputs y lo renombra.
+val allAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+val targetAbi = providers.gradleProperty("targetAbi").orElse("arm64-v8a").get()
+require(targetAbi == "universal" || targetAbi in allAbis) {
+    "ABI no soportada: $targetAbi (valores: universal, ${allAbis.joinToString()})"
+}
+val buildAbis = if (targetAbi == "universal") allAbis else listOf(targetAbi)
+
+// Gradle no compila Rust: el .so lo deja build-android.yml (o tools/) antes.
+// Fallar aqui es mejor que empaquetar un APK sin motor que revienta al abrirlo.
+val checkEmulatorSo by tasks.registering {
+    val abis = buildAbis
+    val jniLibs = layout.projectDirectory.dir("src/main/jniLibs")
+    doLast {
+        abis.forEach { abi ->
+            val so = jniLibs.file("$abi/libgm8emulator.so").asFile
+            require(so.isFile) {
+                "falta ${so.path}; compilalo con: cargo ndk -t $abi --platform 29 " +
+                    "build -p gm8emulator --release --features backend-wgpu (desde engine/src/OpenGMK)"
+            }
+        }
+    }
+}
 
 android {
     namespace = "com.klisee.reloaded.gmk"
@@ -20,8 +52,9 @@ android {
         applicationId = "com.klisee.reloaded"
         minSdk = 26
         targetSdk = 36
-        versionCode = 67
-        versionName = "0.6.7"
+        versionCode = 100
+        versionName = "1.0.0"
+        ndk { abiFilters += buildAbis }
     }
 
     signingConfigs {
@@ -55,6 +88,8 @@ android {
         }
     }
 }
+
+tasks.named("preBuild") { dependsOn(checkEmulatorSo) }
 
 dependencies {
     implementation(project(":shared"))

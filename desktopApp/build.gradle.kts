@@ -40,7 +40,7 @@ nucleus.application {
         // de control y la barra de tareas. Antes era "reloaded-opengmk", el identificador técnico,
         // y el instalador de Windows decía exactamente eso.
         packageName = "Reloaded OpenGMK"
-        packageVersion = "0.6.7"
+        packageVersion = "1.0.0"
         description = "Reloaded OpenGMK: Pokemon Reloaded for Linux, Windows and Android"
         vendor = "Klisee"
         copyright = "Comunidad, sin animo de lucro"
@@ -48,7 +48,7 @@ nucleus.application {
         linux {
             debMaintainer = "Klisee <klisee@users.noreply.github.com>"
             iconFile.set(project.file("icons/reloaded-opengmk.png"))
-            packageVersion = "0.6.7"
+            packageVersion = "1.0.0"
             appCategory = "Game"
             appRelease = "1"
             startupWMClass = "com-klisee-reloaded-gmk-MainKt"

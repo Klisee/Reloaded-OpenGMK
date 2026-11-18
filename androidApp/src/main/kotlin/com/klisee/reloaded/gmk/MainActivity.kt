@@ -120,16 +120,26 @@ class MainActivity : ComponentActivity() {
                     return@rememberLauncherForActivityResult
                 }
                 scope.launch {
-                    val file = withContext(Dispatchers.IO) {
-                        runCatching {
-                            val target = File(cacheDir, "import.zip")
-                            contentResolver.openInputStream(uri)?.use { input ->
-                                target.outputStream().use { output -> input.copyTo(output) }
-                            } ?: error("No pude abrir el archivo.")
-                            target
-                        }.getOrNull()
+                    val result = withContext(Dispatchers.IO) {
+                        AndroidZipPicker.copyToCache(applicationContext, uri) { line ->
+                            gameRepository.log(line)
+                        }
                     }
-                    callback?.invoke(file?.let(::FilePickedFile))
+                    result.onFailure { error ->
+                        // Sin esto el selector se cerraba en silencio y parecía que el botón no hacía nada.
+                        runCatching {
+                            android.widget.Toast.makeText(
+                                applicationContext,
+                                error.message ?: "No pude preparar el zip para importar.",
+                                android.widget.Toast.LENGTH_LONG,
+                            ).show()
+                        }
+                        gameRepository.log(
+                            "Selector: fallo al preparar el zip: " +
+                                "${error.javaClass.simpleName}: ${error.message}",
+                        )
+                    }
+                    callback?.invoke(result.getOrNull()?.let(::FilePickedFile))
                 }
             }
             LaunchedEffect(Unit) {
@@ -155,7 +165,16 @@ class MainActivity : ComponentActivity() {
                 fontFamily = fontFamily,
                 onPickZip = { callback ->
                     pending = callback
-                    picker.launch(arrayOf("application/zip", "application/octet-stream"))
+                    // Algunos gestores de archivos anuncian el zip con MIME propio; con varios
+                    // tipos el selector deja elegirlo en más dispositivos.
+                    picker.launch(
+                        arrayOf(
+                            "application/zip",
+                            "application/x-zip-compressed",
+                            "application/x-zip",
+                            "application/octet-stream",
+                        ),
+                    )
                 },
                 onPickImage = { callback ->
                     pendingImage = callback

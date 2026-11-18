@@ -50,7 +50,7 @@ private fun isWindows(): Boolean =
 
 @OptIn(ExperimentalFluentApi::class)
 fun runWindowsApplication(root: File) {
-    val appVersion = "0.6.7"
+    val appVersion = "1.0.0"
     val updateManager = com.klisee.reloaded.gmk.update.UpdateManager(
         bridge = com.klisee.reloaded.gmk.update.DesktopUpdateBridge(root, appVersion),
         settings = com.klisee.reloaded.gmk.update.FileUpdateSettings(root),

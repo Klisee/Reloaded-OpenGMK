@@ -1772,6 +1772,7 @@ private fun HomeScreen(
                         onImport = ::importGame,
                         onOnline = onOnline,
                         onlineEnabled = onlineEnabled,
+                        onOpenUrl = onOpenUrl,
                     )
                 }
             }
@@ -1849,6 +1850,8 @@ private fun HomeScreen(
                                 )
                             }
                             Spacer(Modifier.height(4.dp))
+                            DiscordCommunityButton(onClick = { onOpenUrl(DISCORD_INVITE_URL) })
+                            Spacer(Modifier.height(10.dp))
                             playButton()
                             if (installed == null) {
                                 Text(
@@ -1898,6 +1901,7 @@ private fun HomeScreen(
                         onImport = ::importGame,
                         onOnline = onOnline,
                         onlineEnabled = onlineEnabled,
+                        onOpenUrl = onOpenUrl,
                     )
                     news()
                     Spacer(Modifier.height(12.dp))
@@ -1965,6 +1969,7 @@ private fun MaterialHomeHero(
     onImport: () -> Unit,
     onOnline: () -> Unit,
     onlineEnabled: Boolean = false,
+    onOpenUrl: (String) -> Unit = {},
 ) {
     val canPlay = installed != null && !busy && !launching
     val shape = RoundedCornerShape(36.dp)
@@ -2071,6 +2076,8 @@ private fun MaterialHomeHero(
                     }
                 }
             }
+
+            DiscordCommunityButton(onClick = { onOpenUrl(DISCORD_INVITE_URL) })
 
             val heroHaptics = rememberInterfaceHaptics()
             Button(
@@ -2303,6 +2310,7 @@ private fun DesktopHeroCard(
     onImport: () -> Unit,
     onOnline: () -> Unit,
     onlineEnabled: Boolean = false,
+    onOpenUrl: (String) -> Unit = {},
 ) {
     val scheme = MaterialTheme.colorScheme
     val canPlay = installed != null && !busy && !launching
@@ -2391,6 +2399,8 @@ private fun DesktopHeroCard(
                     }
                 }
             }
+
+            DiscordCommunityButton(onClick = { onOpenUrl(DISCORD_INVITE_URL) })
 
             val launchHaptics = rememberInterfaceHaptics()
             Button(
