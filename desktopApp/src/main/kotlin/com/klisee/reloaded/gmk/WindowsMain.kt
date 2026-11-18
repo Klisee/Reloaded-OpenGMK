@@ -195,7 +195,15 @@ fun runWindowsApplication(root: File) {
                             onEngineStarted?.invoke(engineProcess)
                             val selfExe = System.getProperty("jpackage.app-path")
                             val watcher = if (isWindows()) {
-                                brandEngineWindow(engineProcess.pid(), root, log, selfExe, ::writeLog)
+                                // Mismo criterio que la interfaz: el ajuste manda y, en "auto", se
+                                // consulta el registro de Windows porque isSystemInDarkTheme() no
+                                // lo lee en escritorio.
+                                val darkBar = when (settings.darkMode) {
+                                    "dark" -> true
+                                    "light" -> false
+                                    else -> WindowsDarkTitleBar.systemPrefersDark() ?: false
+                                }
+                                brandEngineWindow(engineProcess.pid(), root, log, selfExe, darkBar, ::writeLog)
                             } else {
                                 brandLinuxEngineWindow(engineProcess.pid(), root, log, selfExe, ::writeLog)
                             }
@@ -411,6 +419,7 @@ private fun brandEngineWindow(
     root: File,
     logFile: File,
     appExe: String?,
+    darkTitleBar: Boolean,
     log: (String) -> Unit,
 ): Boolean = runCatching {
     val loader = Thread.currentThread().contextClassLoader
@@ -435,6 +444,12 @@ private fun brandEngineWindow(
         "-LogPath",
         logFile.absolutePath,
     )
+    // La ventana del motor la crea el propio motor, así que su barra de título no la toca
+    // WindowsDarkTitleBar (que solo actúa sobre la ventana del launcher). Se pinta desde este
+    // vigilante, que ya recorre las ventanas del proceso para ponerle título e icono.
+    if (darkTitleBar) {
+        command += "-DarkTitleBar"
+    }
     if (!appExe.isNullOrBlank()) {
         command += "-AppExe"
         command += appExe

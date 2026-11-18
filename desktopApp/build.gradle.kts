@@ -36,7 +36,10 @@ nucleus.application {
     }
     nativeDistributions {
         targetFormats(TargetFormat.Deb, TargetFormat.AppImage, TargetFormat.Msi, TargetFormat.Nsis)
-        packageName = "reloaded-opengmk"
+        // Nombre visible del producto: es el que muestran el instalador, el menú Inicio, el panel
+        // de control y la barra de tareas. Antes era "reloaded-opengmk", el identificador técnico,
+        // y el instalador de Windows decía exactamente eso.
+        packageName = "Reloaded OpenGMK"
         packageVersion = "0.6.7"
         description = "Reloaded OpenGMK: Pokemon Reloaded for Linux, Windows and Android"
         vendor = "Klisee"
@@ -52,6 +55,12 @@ nucleus.application {
         }
         windows {
             iconFile.set(project.file("icons/reloaded-opengmk.ico"))
+            // Los accesos del menú Inicio y del escritorio llevan el nombre del producto.
+            menuGroup = "Reloaded OpenGMK"
+            shortcut = true
+            dirChooser = true
+            perUserInstall = false
+            upgradeUuid = "8f2c1d64-3b7a-4f19-9c2e-5a6d0b8e4c31"
         }
     }
 }

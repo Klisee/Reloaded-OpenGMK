@@ -2,7 +2,8 @@ param(
     [int]$EnginePid,
     [string]$IconPath,
     [string]$LogPath,
-    [string]$AppExe
+    [string]$AppExe,
+    [switch]$DarkTitleBar
 )
 
 Add-Type -AssemblyName System.Drawing
@@ -19,6 +20,7 @@ public class ReloadedWin {
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern bool SetWindowText(IntPtr hWnd, string text);
     [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 }
 "@
 
@@ -34,6 +36,26 @@ $iconBig = [IntPtr]1
 $iconSmall = [IntPtr]0
 $wmSetIcon = 0x0080
 
+# Atributos de DWM: 20 (o 19 en Windows 10 antiguo) para la barra oscura, 35/34 para el color de
+# la barra y del borde en Windows 11. Se aplican junto con el titulo porque la ventana del motor
+# se crea despues de arrancar y DWM necesita el handle ya visible.
+$dwmaDark = 20
+$dwmaDarkOld = 19
+$dwmaCaption = 35
+$dwmaBorder = 34
+
+function Set-DarkTitleBar([IntPtr]$hWnd) {
+    $on = 1
+    $ok = ([ReloadedWin]::DwmSetWindowAttribute($hWnd, $dwmaDark, [ref]$on, 4) -eq 0)
+    if (-not $ok) {
+        $null = [ReloadedWin]::DwmSetWindowAttribute($hWnd, $dwmaDarkOld, [ref]$on, 4)
+    }
+    $caption = 0x00202020
+    $null = [ReloadedWin]::DwmSetWindowAttribute($hWnd, $dwmaCaption, [ref]$caption, 4)
+    $border = 0x003D3D3D
+    $null = [ReloadedWin]::DwmSetWindowAttribute($hWnd, $dwmaBorder, [ref]$border, 4)
+}
+
 function Update-Windows {
     $cb = [ReloadedWin+EnumProc]{
         param($hWnd, $lParam)
@@ -48,6 +70,9 @@ function Update-Windows {
                 if ($icon -ne [IntPtr]::Zero) {
                     [void][ReloadedWin]::SendMessage($hWnd, $wmSetIcon, $iconBig, $icon)
                     [void][ReloadedWin]::SendMessage($hWnd, $wmSetIcon, $iconSmall, $icon)
+                }
+                if ($DarkTitleBar) {
+                    Set-DarkTitleBar $hWnd
                 }
             }
         }
