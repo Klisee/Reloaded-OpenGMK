@@ -1,9 +1,16 @@
 param(
-    [string]$EngineRepo = "..\pokemon-reloaded-experimental"
+    # Por defecto el motor vendorizado en este mismo repositorio (engine/src/OpenGMK).
+    # Se puede apuntar a otro clon con -EngineRepo.
+    [string]$EngineRepo = ""
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
+
+if ([string]::IsNullOrWhiteSpace($EngineRepo)) {
+    $EngineRepo = Join-Path $root "engine"
+}
+
 $engine = Join-Path $EngineRepo "src\OpenGMK"
 if (-not (Test-Path $engine)) {
     throw "No encontré el motor en $engine"

@@ -14,3 +14,6 @@ androidApp/keystore.properties
 
 # notas locales de investigacion
 docs/investigacion/
+
+# motor compilado para Windows (artefacto de build, lo copia tools/build-windows.ps1)
+desktopApp/src/main/resources/gm8emulator.exe

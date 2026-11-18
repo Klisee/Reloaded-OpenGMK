@@ -1,0 +1,34 @@
+# Normaliza los finales de línea: el repositorio guarda LF y en Windows se
+# trabaja con CRLF en el disco. Sin esto, cualquier editor de Windows que
+# reescriba un archivo lo convierte entero y el diff de un cambio de una línea
+# pasa a ser el archivo completo.
+* text=auto eol=lf
+
+# Binarios: nunca tocar.
+*.png binary
+*.ico binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.jar binary
+*.exe binary
+*.dll binary
+*.so binary
+*.a binary
+*.rlib binary
+*.7z binary
+*.zip binary
+*.msi binary
+*.deb binary
+*.AppImage binary
+*.mp3 binary
+*.ogg binary
+*.wav binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+
+# Este archivo se deja tal cual, para que su propio formato no dependa de la regla.
+.gitattributes text eol=lf
