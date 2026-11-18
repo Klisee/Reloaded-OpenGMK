@@ -21,8 +21,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
-// TODO: sustituir por la invitación real de Discord del proyecto.
-const val DISCORD_INVITE_URL = "https://discord.gg/reloadedopengmk"
+/** Invitación del Discord del proyecto. */
+const val DISCORD_INVITE_URL = "https://discord.gg/c8D3X78zhg"
 
 private val DiscordBlurple = Color(0xFF5865F2)
 
