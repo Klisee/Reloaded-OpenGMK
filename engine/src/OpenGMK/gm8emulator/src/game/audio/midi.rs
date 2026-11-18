@@ -26,31 +26,83 @@ const CHANNELS: u16 = 2;
 const INITIAL_BLOCK: usize = 4096;
 
 /// Where to look for a GM SoundFont. Users can override with the `OPENGMK_SOUNDFONT` env var.
+///
+/// El orden importa: primero el override del usuario, después las rutas propias de la plataforma
+/// y, al final, el SoundFont que viaja con el motor. Antes la lista era solo de Linux, así que en
+/// Windows nunca se encontraba ninguno y toda la música MIDI del juego quedaba muda; las rutas de
+/// Windows (`gm.dls` sobre todo) estaban ausentes.
 fn soundfont_candidates() -> Vec<PathBuf> {
     if let Some(path) = std::env::var_os("OPENGMK_SOUNDFONT") {
         return vec![PathBuf::from(path)]
     }
-    vec![
-        PathBuf::from("/usr/share/sounds/sf2/default-GM.sf2"),
-        PathBuf::from("/usr/share/sounds/sf2/TimGM6mb.sf2"),
-        PathBuf::from("/usr/share/soundfonts/default-GM.sf2"),
-        PathBuf::from("/usr/share/soundfonts/FluidR3_GM.sf2"),
-        PathBuf::from("/usr/share/sounds/sf2/FluidR3_GM.sf2"),
-    ]
+
+    let mut candidates = Vec::new();
+
+    #[cfg(target_os = "windows")]
+    {
+        // `gm.dls` viene con Windows desde XP, pero rustysynth solo entiende SF2 (no DLS), así que no
+        // sirve como está. Se listan igualmente por si alguien deja un SF2 junto a ellas.
+        if let Some(windir) = std::env::var_os("SystemRoot") {
+            let windir = PathBuf::from(windir);
+            candidates.push(windir.join("System32\\drivers\\gm.sf2"));
+            candidates.push(windir.join("System32\\drivers\\etc\\gm.sf2"));
+        }
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            candidates.push(PathBuf::from(appdata).join("Reloaded OpenGMK\\soundfont.sf2"));
+        }
+        if let Some(programdata) = std::env::var_os("ProgramData") {
+            candidates.push(PathBuf::from(programdata).join("Reloaded OpenGMK\\soundfont.sf2"));
+        }
+        // Junto al ejecutable del motor.
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                candidates.push(dir.join("soundfont.sf2"));
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        candidates.push(PathBuf::from("/usr/share/sounds/sf2/default-GM.sf2"));
+        candidates.push(PathBuf::from("/usr/share/sounds/sf2/TimGM6mb.sf2"));
+        candidates.push(PathBuf::from("/usr/share/soundfonts/default-GM.sf2"));
+        candidates.push(PathBuf::from("/usr/share/soundfonts/FluidR3_GM.sf2"));
+        candidates.push(PathBuf::from("/usr/share/sounds/sf2/FluidR3_GM.sf2"));
+        // Junto al ejecutable, igual que en Windows.
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                candidates.push(dir.join("soundfont.sf2"));
+            }
+        }
+    }
+
+    candidates
 }
+
+/// SoundFont reducido que viaja con el motor y cubre los 128 instrumentos de GM.
+///
+/// Sin él, un equipo sin SoundFonts del sistema deja toda la música MIDI en silencio, que es lo
+/// que pasaba en Windows: el motor solo buscaba rutas de Linux. Se usa como último recurso, así
+/// que si el usuario tiene uno mejor (o define `OPENGMK_SOUNDFONT`), ese gana.
+const BUNDLED_SOUNDFONT: &[u8] = include_bytes!("../../soundfont/GeneralUser-GS.sf2");
 
 fn load_soundfont() -> Option<Vec<u8>> {
     for path in soundfont_candidates() {
         match std::fs::read(&path) {
-            Ok(bytes) => return Some(bytes),
-            Err(e) => eprintln!("could not load soundfont '{}': {}", path.display(), e),
+            Ok(bytes) if !bytes.is_empty() => {
+                eprintln!("[midi] soundfont: {}", path.display());
+                return Some(bytes)
+            },
+            Ok(_) => eprintln!("[midi] soundfont vacio: {}", path.display()),
+            Err(e) => eprintln!("[midi] no se pudo leer '{}': {}", path.display(), e),
         }
     }
-    eprintln!(
-        "no SoundFont (.sf2) found for MIDI playback - install one, e.g. `fluidsynth` or \
-         `timgm6mb-soundfont`, or point OPENGMK_SOUNDFONT at one"
-    );
-    None
+    eprintln!("[midi] sin SoundFont del sistema; se usa el incluido en el motor");
+    if BUNDLED_SOUNDFONT.is_empty() {
+        None
+    } else {
+        Some(BUNDLED_SOUNDFONT.to_vec())
+    }
 }
 
 /// The parsed SoundFont, shared by every synthesizer.
@@ -221,5 +273,47 @@ impl Source for MidiSource {
     fn reset(&mut self) {
         self.sequencer.play(&self.midi, self.looping);
         self.finished = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// El SoundFont incluido tiene que parsear: si `SoundFont::new` falla, el motor seguiría
+    /// arrancando pero toda la música MIDI quedaría muda sin ningún error visible.
+    #[test]
+    fn bundled_soundfont_parses() {
+        let bytes = BUNDLED_SOUNDFONT;
+        assert!(!bytes.is_empty(), "el SoundFont incluido está vacío");
+        SoundFont::new(&mut Cursor::new(bytes)).expect("el SoundFont incluido no parsea");
+    }
+
+    /// Un SoundFont puede cargar y aun así no producir sonido si las muestras están truncadas.
+    /// Aquí se toca una nota y se comprueba que salen muestras distintas de cero.
+    #[test]
+    fn soundfont_produces_audio() {
+        let bytes = load_soundfont().expect("no se encontró ningún SoundFont");
+        let font = SoundFont::new(&mut Cursor::new(&bytes)).expect("el SoundFont no parsea");
+
+        let settings = SynthesizerSettings::new(SAMPLE_RATE as i32);
+        let font = Arc::new(font);
+        let mut synth = Synthesizer::new(&font, &settings).expect("no se pudo crear el sintetizador");
+
+        // (canal, nota, velocidad): Do central, con el preset de piano que asigna el canal 0.
+        synth.note_on(0, 60, 100);
+
+        let mut left = vec![0.0f32; 1024];
+        let mut right = vec![0.0f32; 1024];
+        synth.render(&mut left, &mut right);
+
+        let peak = left
+            .iter()
+            .chain(right.iter())
+            .fold(0.0f32, |acc, s| acc.max(s.abs()));
+        assert!(
+            peak > 0.001,
+            "el sintetizador devolvió silencio (pico {peak}); el SoundFont no sirve para MIDI"
+        );
     }
 }

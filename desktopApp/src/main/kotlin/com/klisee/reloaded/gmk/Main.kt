@@ -30,6 +30,9 @@ internal fun findEngine(root: File): File? {
         "gm8emulator"
     }
     val installed = File(root, "engine/$engineName")
+    // El SoundFont de MIDI viaja dentro del motor, así que no hace falta copiarlo. Pero si hay uno
+    // en la carpeta del motor, el motor lo prefiere: así se puede cambiar la música MIDI sin
+    // recompilar. Esta función solo garantiza que el motor esté al día.
     val bundled = System.getProperty("compose.application.resources.dir")
         ?.let { File(it, engineName) }
         ?.takeIf { it.isFile }
