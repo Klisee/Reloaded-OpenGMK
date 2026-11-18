@@ -84,7 +84,9 @@ fn soundfont_candidates() -> Vec<PathBuf> {
 /// Sin él, un equipo sin SoundFonts del sistema deja toda la música MIDI en silencio, que es lo
 /// que pasaba en Windows: el motor solo buscaba rutas de Linux. Se usa como último recurso, así
 /// que si el usuario tiene uno mejor (o define `OPENGMK_SOUNDFONT`), ese gana.
-const BUNDLED_SOUNDFONT: &[u8] = include_bytes!("../../soundfont/GeneralUser-GS.sf2");
+///
+/// TimGM6mb, GPL-2 (la misma familia que este proyecto). Ver `soundfont/README.md`.
+const BUNDLED_SOUNDFONT: &[u8] = include_bytes!("../../soundfont/TimGM6mb.sf2");
 
 fn load_soundfont() -> Option<Vec<u8>> {
     for path in soundfont_candidates() {

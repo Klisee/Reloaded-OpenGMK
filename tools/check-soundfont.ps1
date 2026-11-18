@@ -9,7 +9,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
-$sf2 = "engine\src\OpenGMK\gm8emulator\src\soundfont\GeneralUser-GS.sf2"
+$sf2 = "engine\src\OpenGMK\gm8emulator\src\soundfont\TimGM6mb.sf2"
 if (-not (Test-Path $sf2)) { throw "Falta el SoundFont en $sf2" }
 
 $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $sf2).Path)
