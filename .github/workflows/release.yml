@@ -154,7 +154,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config libasound2-dev libpulse-dev \
+            build-essential pkg-config libasound2-dev libpulse-dev libjack-jackd2-dev \
             libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
             libxcb1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-render0-dev \
             libgl1-mesa-dev libegl1-mesa-dev libudev-dev libfontconfig1-dev \
