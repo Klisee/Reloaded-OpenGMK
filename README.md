@@ -61,7 +61,7 @@ actualización y se perderían los datos privados.
 
 Los archivos originales de **Pokémon Reloaded**, disponibles en el blog de F3R:
 
-[pokemon-reloaded.blogspot.com](https://pokemon-reloaded.blogspot.com/)
+[The Last Beta 1.9.2](https://pokemon-reloaded.blogspot.com/2026/08/the-last-beta-192.html)
 
 Este repositorio no incluye el juego ni sus assets. Tampoco se distribuyen con los instaladores.
 

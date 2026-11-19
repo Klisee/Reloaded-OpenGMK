@@ -57,12 +57,6 @@ class UpdateManager(
     val currentVersion: String get() = bridge.installedVersion
     val platform: UpdatePlatform get() = bridge.platform
 
-    /**
-     * Se llama cuando una comprobación automática encuentra algo nuevo, para que la plataforma
-     * pueda avisar (notificación en Android). El launcher no necesita hacer nada con esto.
-     */
-    var onUpdateFound: ((GitHubRelease) -> Unit)? = null
-
     /** Historial guardado de la última vez, para poder enseñarlo sin conexión. */
     fun cachedHistory(): List<GitHubRelease> = runCatching {
         json.decodeFromString<List<GitHubRelease>>(settings.cachedReleasesJson)
@@ -93,11 +87,6 @@ class UpdateManager(
             if (update == null) {
                 mutableState.value = UpdateState.UpToDate(now)
             } else {
-                // Solo se avisa del chequeo automático y una vez por versión: abrir la app no debe
-                // repetir la notificación cada hora.
-                if (automatic && settings.notifications) {
-                    onUpdateFound?.invoke(update)
-                }
                 if (update.assetFor(platform) == null) {
                     mutableState.value = UpdateState.Failed(UpdateFailure.NoAsset, update)
                 } else {
@@ -151,14 +140,6 @@ class UpdateManager(
         } catch (error: Throwable) {
             UpdateState.Failed(UpdateFailure.Install, ready.release)
         }.also { mutableState.value = it }
-    }
-
-    /** Cuenta para la notificación: no repetir la misma versión en cada arranque. */
-    fun shouldNotify(release: GitHubRelease): Boolean {
-        val key = release.version
-        if (!settings.notifications || settings.lastNotifiedKey == key) return false
-        settings.lastNotifiedKey = key
-        return true
     }
 
     /** Descarga e instala de una vez, que es lo que hace el botón principal. */

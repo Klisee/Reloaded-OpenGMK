@@ -125,6 +125,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -236,10 +237,38 @@ fun App(
         }
 
         // Comprobación silenciosa al abrir: como mucho una vez por hora, y si falla no molesta.
+        // Si encuentra algo, no se avisa con una notificación del sistema: se abre un aviso dentro
+        // de la app, en el momento en que el usuario la está usando.
+        var updateNotice by remember { mutableStateOf<com.klisee.reloaded.gmk.update.GitHubRelease?>(null) }
+        var updateDismissed by remember { mutableStateOf(false) }
         LaunchedEffect(updateManager) {
             val manager = updateManager ?: return@LaunchedEffect
             if (!manager.updateSettings.autoCheck) return@LaunchedEffect
             runCatching { manager.check(automatic = true) }
+            val found = manager.state.value as? com.klisee.reloaded.gmk.update.UpdateState.Available
+            // Una vez descartada, no se vuelve a enseñar en esta sesión: molesta más que ayuda.
+            if (found != null && !updateDismissed) updateNotice = found.release
+        }
+
+        if (updateNotice != null && updateManager != null) {
+            val release = updateNotice!!
+            val manager = updateManager
+            val updateState by manager.state.collectAsState()
+            val updateProgress by manager.progress.collectAsState()
+            com.klisee.reloaded.gmk.update.UpdateAvailableDialog(
+                release = release,
+                state = updateState,
+                progress = updateProgress,
+                onInstall = {
+                    kotlinx.coroutines.MainScope().launch { manager.downloadAndInstall(release) }
+                },
+                onDismiss = {
+                    updateNotice = null
+                    updateDismissed = true
+                },
+                onOpenUrl = onOpenUrl,
+                logo = logo,
+            )
         }
 
         if (!onboarded) {
@@ -443,7 +472,11 @@ fun App(
     }
 }
 
-private const val BLOG_DOWNLOAD_URL = "https://pokemon-reloaded.blogspot.com/2026/08/"
+/**
+ * Descarga del juego. Va al post exacto de F3R, no a la portada del blog: así el usuario llega a
+ * la versión vigente sin buscar entre entradas.
+ */
+private const val BLOG_DOWNLOAD_URL = "https://pokemon-reloaded.blogspot.com/2026/08/the-last-beta-192.html"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -507,7 +540,7 @@ private fun Onboarding(
                 log = log,
                 installed = installed,
                 onDownload = {
-                    (post?.postUrl ?: post?.links?.firstOrNull()?.url)?.let(onOpenUrl)
+                    BLOG_DOWNLOAD_URL.let(onOpenUrl)
                 },
                 onImport = ::import,
                 keepScreenOn = keepScreenOn,
@@ -613,7 +646,7 @@ private fun Onboarding(
                             progress = progress,
                             log = log,
                             installed = installed,
-                            onDownload = { (post?.postUrl ?: post?.links?.firstOrNull()?.url)?.let(onOpenUrl) },
+                            onDownload = { BLOG_DOWNLOAD_URL.let(onOpenUrl) },
                             onImport = ::import,
                         )
                         else -> OnboardingPreferences(
@@ -687,7 +720,8 @@ private fun DesktopOnboarding(
     val scheme = MaterialTheme.colorScheme
     val display = reloadedDisplayFont()
     val t = LocalLauncherStrings.current
-    val downloadUrl = post?.postUrl ?: post?.links?.firstOrNull()?.url
+    // La descarga va al post del juego de F3R; el post del blog propio es solo la novedad.
+    val downloadUrl = BLOG_DOWNLOAD_URL
 
     Box(
         modifier = Modifier
@@ -1835,6 +1869,7 @@ private fun HomeScreen(
                                 .padding(28.dp),
                             verticalArrangement = Arrangement.spacedBy(14.dp),
                         ) {
+                            DiscordCommunityButton(onClick = { onOpenUrl(DISCORD_INVITE_URL) })
                             Text("Tu partida", style = MaterialTheme.typography.headlineSmall)
                             if (installed == null) {
                                 Text(
@@ -1849,8 +1884,6 @@ private fun HomeScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
-                            Spacer(Modifier.height(4.dp))
-                            DiscordCommunityButton(onClick = { onOpenUrl(DISCORD_INVITE_URL) })
                             Spacer(Modifier.height(10.dp))
                             playButton()
                             if (installed == null) {
@@ -2001,6 +2034,8 @@ private fun MaterialHomeHero(
             modifier = Modifier.padding(22.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            DiscordCommunityButton(onClick = { onOpenUrl(DISCORD_INVITE_URL) })
+
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     shape = RoundedCornerShape(20.dp),
@@ -2076,8 +2111,6 @@ private fun MaterialHomeHero(
                     }
                 }
             }
-
-            DiscordCommunityButton(onClick = { onOpenUrl(DISCORD_INVITE_URL) })
 
             val heroHaptics = rememberInterfaceHaptics()
             Button(
@@ -2344,6 +2377,9 @@ private fun DesktopHeroCard(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
+            // El botón de la comunidad va arriba del todo, antes del estado de la partida.
+            DiscordCommunityButton(onClick = { onOpenUrl(DISCORD_INVITE_URL) })
+
             Text(
                 "Tu partida",
                 style = MaterialTheme.typography.titleMedium,
@@ -2399,8 +2435,6 @@ private fun DesktopHeroCard(
                     }
                 }
             }
-
-            DiscordCommunityButton(onClick = { onOpenUrl(DISCORD_INVITE_URL) })
 
             val launchHaptics = rememberInterfaceHaptics()
             Button(

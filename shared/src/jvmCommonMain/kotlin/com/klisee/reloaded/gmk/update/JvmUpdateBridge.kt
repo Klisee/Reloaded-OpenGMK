@@ -27,10 +27,6 @@ class FileUpdateSettings(private val root: File) : UpdateSettings {
             .takeIf { it == UPDATE_CHANNEL_BETA } ?: UPDATE_CHANNEL_STABLE
         set(value) = put("channel", if (value == UPDATE_CHANNEL_BETA) UPDATE_CHANNEL_BETA else UPDATE_CHANNEL_STABLE)
 
-    override var notifications: Boolean
-        get() = values.getProperty("notifications", "1") == "1"
-        set(value) = put("notifications", if (value) "1" else "0")
-
     override var lastCheckAt: Long
         get() = values.getProperty("lastCheckAt", "0").toLongOrNull() ?: 0L
         set(value) = put("lastCheckAt", value.toString())
@@ -42,10 +38,6 @@ class FileUpdateSettings(private val root: File) : UpdateSettings {
     override var cachedReleasesJson: String
         get() = values.getProperty("cachedReleases", "")
         set(value) = put("cachedReleases", value)
-
-    override var lastNotifiedKey: String
-        get() = values.getProperty("lastNotifiedKey", "")
-        set(value) = put("lastNotifiedKey", value)
 
     private fun put(key: String, value: String) {
         values.setProperty(key, value)

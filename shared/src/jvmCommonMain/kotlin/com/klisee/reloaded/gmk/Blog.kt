@@ -3,15 +3,15 @@ package com.klisee.reloaded.gmk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import java.net.HttpURLConnection
 import java.net.URL
 
 object Blog {
-    private const val FEED = "https://pokemon-reloaded.blogspot.com/feeds/posts/default?alt=json&max-results=1"
+    /** Índice del blog propio. Se lee de aquí y no de un feed: klisee.com no publica RSS. */
+    private const val INDEX = "https://klisee.com/blog"
+
+    /** Enlace exacto de descarga del juego en el blog de F3R. */
+    const val GAME_DOWNLOAD_URL = "https://pokemon-reloaded.blogspot.com/2026/08/the-last-beta-192.html"
 
     data class Link(val label: String, val url: String)
 
@@ -35,7 +35,7 @@ object Blog {
     }
 
     private fun fetch(): Post {
-        val connection = (URL(FEED).openConnection() as HttpURLConnection).apply {
+        val connection = (URL(INDEX).openConnection() as HttpURLConnection).apply {
             connectTimeout = 20_000
             readTimeout = 20_000
             setRequestProperty("User-Agent", "ReloadedLauncher/1.0")
@@ -46,13 +46,9 @@ object Blog {
         return parse(body)
     }
 
-    private val ANCHOR = Regex("""<a\s[^>]*href="([^"]+)"[^>]*>(.*?)</a>""", RegexOption.IGNORE_CASE)
     private val TAG = Regex("<[^>]+>")
     private val VERSION = Regex("""\d+\.\d+(?:\.\d+){1,2}""")
     private val BETA_VERSION = Regex("""Beta\s+(\d+\.\d+(?:\.\d+){1,2})""", RegexOption.IGNORE_CASE)
-    private val IMAGE = Regex("""<img[^>]+src="([^"]+)"""", RegexOption.IGNORE_CASE)
-    private val DROP_BLOCKS = Regex("""<(script|style)[^>]*>.*?</\1>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
-    private val PARAGRAPH = Regex("""<br\s*/?>|</p>|</div>|</h\d>""", RegexOption.IGNORE_CASE)
     private val NUMERIC_ENTITY = Regex("""&#(\d+);""")
     private val NAMED_ENTITIES = mapOf(
         "&nbsp;" to " ", "&amp;" to "&", "&quot;" to "\"", "&#39;" to "'", "&apos;" to "'",
@@ -63,26 +59,95 @@ object Blog {
         "&ndash;" to "–", "&mdash;" to "—", "&middot;" to "·", "&deg;" to "°", "&trade;" to "™",
     )
 
+    /**
+     * Lee la tarjeta destacada del listado del blog (o la primera entrada de la lista).
+     *
+     * klisee.com es un sitio Next.js: no hay RSS ni JSON público, así que se lee el HTML. Lo que
+     * interesa está en tres sitios estables de la tarjeta: el enlace `/blog/<slug>`, el `<h2>` con
+     * el título y el `<time>` con la fecha. El resumen sale del extracto de la tarjeta.
+     */
     private fun parse(body: String): Post {
-        val root = Json.parseToJsonElement(body).jsonObject
-        val entry = root["feed"]!!.jsonObject["entry"]!!.jsonArray[0].jsonObject
-        val title = entry["title"]!!.jsonObject["\$t"]!!.jsonPrimitive.content
-        val html = entry["content"]!!.jsonObject["\$t"]!!.jsonPrimitive.content
-        val postUrl = entry["link"]?.jsonArray
-            ?.map { it.jsonObject }
-            ?.firstOrNull { it["rel"]?.jsonPrimitive?.content == "alternate" }
-            ?.get("href")?.jsonPrimitive?.content?.takeIf { it.isNotEmpty() }
-        val published = entry["published"]?.jsonObject?.get("\$t")?.jsonPrimitive?.content?.take(10)
-        val links = downloadLinks(html)
+        val card = Regex("""<a[^>]+href="(/blog/[^"#?]+)"[^>]*>(.*?)</a>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+            .findAll(body)
+            .map { match -> match.groupValues[1] to match.groupValues[2] }
+            .firstOrNull { (href, _) ->
+                // El propio listado enlaza a "/blog" y a otras secciones: solo sirven los posts.
+                href.removePrefix("/blog/").isNotBlank() && !href.endsWith(".png")
+            }
+            ?: error("El blog no tiene entradas.")
+
+        val (path, cardHtml) = card
+        val title = Regex("""<h[12][^>]*>(.*?)</h[12]>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+            .find(cardHtml)?.groupValues?.get(1)?.let(::plainText)
+            ?.takeIf { it.isNotBlank() }
+            ?: error("La entrada del blog no tiene título.")
+        val published = Regex("""<time[^>]*>(.*?)</time>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+            .find(cardHtml)?.groupValues?.get(1)?.let(::plainText)
+            ?.takeIf { it.isNotBlank() }
+            ?.let(::toIsoDate)
+        val excerpt = Regex("""class="[^"]*cardExcerpt[^"]*"[^>]*>(.*?)</p>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+            .find(cardHtml)?.groupValues?.get(1)?.let(::plainText)
+            ?.takeIf { it.isNotBlank() }
+        val cover = Regex("""url\(&#x27;(/[^&]+)&#x27;\)|url\('(/[^']+)'\)""")
+            .find(cardHtml)?.let { it.groupValues[1].ifBlank { it.groupValues[2] } }
+
+        val postUrl = "https://klisee.com$path"
+        // La descarga va siempre al blog de F3R, y el botón de la portada usa este mismo enlace.
+        val download = Link(label = "Descargar Pokémon Reloaded", url = GAME_DOWNLOAD_URL)
         return Post(
             title = title,
-            version = newestVersion(title, links),
-            links = links,
+            version = newestVersion(title, listOf(download)),
+            links = listOf(download),
             postUrl = postUrl,
             published = published,
-            images = images(html),
-            summary = summary(html),
+            images = listOfNotNull(cover?.let { "https://klisee.com$it" }),
+            summary = excerpt ?: "",
         )
+    }
+
+    private val MONTHS = mapOf(
+        "enero" to 1, "febrero" to 2, "marzo" to 3, "abril" to 4, "mayo" to 5, "junio" to 6,
+        "julio" to 7, "agosto" to 8, "septiembre" to 9, "setiembre" to 9, "octubre" to 10,
+        "noviembre" to 11, "diciembre" to 12,
+    )
+
+    /**
+     * El blog escribe la fecha en castellano («18 de noviembre de 2026»). El resto de la app
+     * trabaja con ISO (`yyyy-MM-dd`), así que se convierte aquí y no en cada plataforma: Android,
+     * escritorio e iOS tienen formateadores distintos y ninguno entiende el texto del blog.
+     */
+    private fun toIsoDate(text: String): String? {
+        val iso = Regex("""(\d{4})-(\d{2})-(\d{2})""").find(text)
+        if (iso != null) return iso.value
+        val match = Regex("""(\d{1,2})\s+de\s+([a-záéíóúñ]+)\s+de\s+(\d{4})""", RegexOption.IGNORE_CASE).find(text)
+        if (match != null) {
+            val day = match.groupValues[1].toIntOrNull()
+            val month = MONTHS[match.groupValues[2].lowercase()]
+            val year = match.groupValues[3].toIntOrNull()
+            if (day != null && month != null && year != null) {
+                return "%04d-%02d-%02d".format(year, month, day)
+            }
+        }
+        // dd/mm/aaaa, por si el sitio cambia de formato.
+        val slash = Regex("""(\d{1,2})/(\d{1,2})/(\d{4})""").find(text)
+        if (slash != null) {
+            return "%04d-%02d-%02d".format(
+                slash.groupValues[3].toInt(),
+                slash.groupValues[2].toInt(),
+                slash.groupValues[1].toInt(),
+            )
+        }
+        return null
+    }
+
+    /** Quita etiquetas y decodifica las entidades que usa el sitio. */
+    private fun plainText(html: String): String {
+        var text = TAG.replace(html, "")
+        NAMED_ENTITIES.forEach { (entity, value) -> text = text.replace(entity, value) }
+        text = NUMERIC_ENTITY.replace(text) { match ->
+            match.groupValues[1].toIntOrNull()?.let { String(Character.toChars(it)) } ?: match.value
+        }
+        return text.replace(Regex("\\s+"), " ").trim()
     }
 
     private fun newestVersion(title: String, links: List<Link>): String? {
@@ -99,35 +164,5 @@ object Blog {
             if (diff != 0) return diff
         }
         return 0
-    }
-
-    private fun downloadLinks(html: String): List<Link> =
-        ANCHOR.findAll(html)
-            .map { Link(label = TAG.replace(it.groupValues[2], "").trim(), url = it.groupValues[1]) }
-            .filter { it.url.contains("mega.nz") || it.url.contains("gofile.io") }
-            .distinctBy { it.url }
-            .toList()
-
-    private fun images(html: String): List<String> =
-        IMAGE.findAll(html)
-            .map { it.groupValues[1] }
-            .filter { it.startsWith("http") }
-            .distinct()
-            .toList()
-
-    private fun summary(html: String): String {
-        var text = DROP_BLOCKS.replace(html, " ")
-        text = PARAGRAPH.replace(text, "\n")
-        text = TAG.replace(text, "")
-        NAMED_ENTITIES.forEach { (entity, value) -> text = text.replace(entity, value) }
-        text = NUMERIC_ENTITY.replace(text) { match -> match.groupValues[1].toIntOrNull()?.let { String(Character.toChars(it)) } ?: match.value }
-        val paragraphs = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
-        val preview = StringBuilder()
-        for (paragraph in paragraphs) {
-            if (preview.length + paragraph.length > 700) break
-            if (preview.isNotEmpty()) preview.append('\n')
-            preview.append(paragraph)
-        }
-        return preview.toString().ifEmpty { paragraphs.firstOrNull().orEmpty().take(700) }
     }
 }

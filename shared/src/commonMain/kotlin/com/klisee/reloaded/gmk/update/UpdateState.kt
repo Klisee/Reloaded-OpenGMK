@@ -47,9 +47,6 @@ interface UpdateSettings {
     /** Canal: `stable` o `beta`. */
     var channel: String
 
-    /** Avisar con una notificación del sistema cuando hay algo nuevo. */
-    var notifications: Boolean
-
     /** Última comprobación que terminó bien, en milisegundos. */
     var lastCheckAt: Long
 
@@ -58,9 +55,6 @@ interface UpdateSettings {
 
     /** Las releases ya consultadas, en JSON, para enseñar el historial sin red. */
     var cachedReleasesJson: String
-
-    /** Clave de la última versión avisada por notificación, para no repetirla. */
-    var lastNotifiedKey: String
 }
 
 /** Cada cuánto se vuelve a mirar GitHub por iniciativa propia. */
