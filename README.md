@@ -1,21 +1,35 @@
 <p align="center">
-  <img src="docs/logo.svg" width="160" alt="Logo de Reloaded OpenGMK">
-</p>
-
-<h1 align="center">Reloaded OpenGMK</h1>
-
-<p align="center">
-  <strong>Pokémon Reloaded</strong> en Android, Linux y Windows, impulsado por
-  <a href="https://github.com/OpenGMK/OpenGMK">OpenGMK</a>.
+  <img src="docs/img/banner.png" alt="Reloaded OpenGMK — cliente no oficial de Pokémon Reloaded" width="100%">
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/licencia-GPL--2.0--only-515050?style=flat-square" alt="Licencia GPL-2.0-only"></a>
-  <img src="https://img.shields.io/badge/Android-beta-3DDC84?style=flat-square" alt="Android beta">
-  <img src="https://img.shields.io/badge/Linux-beta-FCC624?style=flat-square" alt="Linux beta">
-  <img src="https://img.shields.io/badge/Windows-beta-0078D4?style=flat-square" alt="Windows beta">
-  <img src="https://img.shields.io/badge/iOS-en%20preparaci%C3%B3n-999999?style=flat-square" alt="iOS en preparación">
+  <img src="https://img.shields.io/badge/versi%C3%B3n-1.0.0-5865F2?style=flat-square" alt="Versión 1.0.0">
+  <img src="https://img.shields.io/badge/Android-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Android">
+  <img src="https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black" alt="Linux">
+  <img src="https://img.shields.io/badge/Windows-0078D4?style=flat-square&logo=windows&logoColor=white" alt="Windows">
+  <img src="https://img.shields.io/badge/iOS-en%20preparaci%C3%B3n-999999?style=flat-square&logo=apple&logoColor=white" alt="iOS en preparación">
 </p>
+
+<p align="center">
+  <a href="https://github.com/Klisee/Reloaded-OpenGMK/releases/latest"><strong>Descargar la última versión</strong></a>
+  ·
+  <a href="https://discord.gg/c8D3X78zhg">Discord</a>
+  ·
+  <a href="https://klisee.com/blog/reloaded-opengmk">Blog</a>
+</p>
+
+---
+
+<p align="center">
+  <img src="docs/img/escritorio.png" alt="Reloaded OpenGMK en Linux" width="78%">
+</p>
+
+<p align="center">
+  <img src="docs/img/android.png" alt="Reloaded OpenGMK en Android" width="30%">
+</p>
+
+<br>
 
 ## Qué es Reloaded OpenGMK
 
